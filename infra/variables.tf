@@ -76,13 +76,13 @@ variable "enable_jumpbox" {
 }
 
 variable "enable_entra_login" {
-  description = "Enable Microsoft Entra ID (AAD) SSH login on the jumpbox VM"
+  description = "Enable Microsoft Entra ID (AAD) SSH login on the Linux jumpbox VM"
   type        = bool
   default     = true
 }
 
 variable "vm_admin_login_principal_ids" {
-  description = "List of Entra group or user object IDs to grant Virtual Machine Administrator Login role on the jumpbox"
+  description = "List of Entra group or user object IDs to grant Virtual Machine Administrator Login on the Linux jumpbox VM for interactive Entra SSH access"
   type        = list(string)
   default     = []
 
@@ -92,6 +92,23 @@ variable "vm_admin_login_principal_ids" {
       can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", id))
     ])
     error_message = "All entries in vm_admin_login_principal_ids must be valid GUIDs (e.g. 033ec9ae-c728-42ae-8b40-0ca8fe777133)."
+  }
+}
+
+variable "vm_admin_login_group_display_names" {
+  description = "List of Entra group display names to grant Virtual Machine Administrator Login on the Linux jumpbox VM for interactive Entra SSH access"
+  type        = list(string)
+  default = [
+    "DO_PuC_Azure_Live_b9cee3_Owners",
+    "DO_PuC_Azure_Live_b9cee3_Contributors"
+  ]
+
+  validation {
+    condition = alltrue([
+      for name in var.vm_admin_login_group_display_names :
+      trimspace(name) != ""
+    ])
+    error_message = "All entries in vm_admin_login_group_display_names must be non-empty group display names."
   }
 }
 ### -----------------------------------------------------------------------------

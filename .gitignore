@@ -44,3 +44,4 @@ terraform.rc
 # planout
 .copilot/*
 .copilot-memory/**
+**/*.lock.hcl

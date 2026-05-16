@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # =============================================================================
 # bastion-proxy.ps1 — SOCKS5 proxy via Azure Bastion
 # =============================================================================
@@ -13,17 +13,23 @@
 #   bastion extension: az extension add --name bastion
 #   ssh extension:     az extension add --name ssh   (AAD auth only)
 #   Standard SKU Azure Bastion with native tunnelling enabled
-#   "Virtual Machine Administrator Login" RBAC role on the VM (AAD auth)
+#   The signing-in Entra user, or a group they belong to, must have
+#   "Virtual Machine Administrator Login" on the Linux jumpbox VM (AAD auth)
 #
 # AUTHENTICATION
 #   Uses normal Azure CLI Entra browser login with MFA.
+#   Entra login alone is not enough; the authenticated user must also be
+#   authorized on the Linux VM through the VM login RBAC assignment.
 #
 # USAGE
 #   .\scripts\bastion-proxy.ps1 -ResourceGroup <rg> -BastionName <name> -VmName <vm>
 #
 # EXAMPLES
 #   # Entra ID (AAD) auth:
-#   .\scripts\bastion-proxy.ps1 -ResourceGroup ai-hub-tools -BastionName ai-hub-bastion -VmName ai-hub-jumpbox
+#   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-fabric-tunnel-tools -BastionName eo-dmi-alz-fabric-tunnel-bastion -VmName eo-dmi-alz-fabric-tunnel-jumpbox
+#
+#   # Override the active Azure subscription if needed:
+#   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-fabric-tunnel-tools -BastionName eo-dmi-alz-fabric-tunnel-bastion -VmName eo-dmi-alz-fabric-tunnel-jumpbox -SubscriptionId <subscription-id>
 #
 # =============================================================================
 
@@ -41,6 +47,9 @@ param(
     [Parameter(Mandatory)]
     [string]$VmName,
 
+    [Alias('s')]
+    [string]$SubscriptionId = '',
+
     [Alias('p')]
     [int]$Port = 8228
 )
@@ -48,16 +57,71 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ── Constants ─────────────────────────────────────────────────────────────────
-
-$SUBSCRIPTION_ID = 'eb733692-257d-40c8-bd7b-372e689f3b7f'
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Write-Info { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Cyan }
 function Write-Ok { param([string]$Msg) Write-Host "[ OK ]  $Msg" -ForegroundColor Green }
 function Write-Warn { param([string]$Msg) Write-Host "[WARN]  $Msg" -ForegroundColor Yellow }
 function Write-Err { param([string]$Msg) Write-Host "[ERROR] $Msg" -ForegroundColor Red }
+
+function Get-ProxyBrowser {
+    $candidates = @(
+        @{
+            Name  = 'Edge'
+            Paths = @(
+                (Join-Path $env:LocalAppData 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
+                (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe')
+            )
+        },
+        @{
+            Name  = 'Chrome'
+            Paths = @(
+                (Join-Path $env:LocalAppData 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
+                (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe')
+            )
+        }
+    )
+
+    foreach ($candidate in $candidates) {
+        foreach ($path in $candidate.Paths) {
+            if ($path -and (Test-Path $path)) {
+                return [pscustomobject]@{
+                    Name = $candidate.Name
+                    Path = $path
+                }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Start-ProxyBrowser {
+    param([int]$ProxyPort)
+
+    $browser = Get-ProxyBrowser
+    if (-not $browser) {
+        Write-Warn 'Edge and Chrome were not found. Skipping automatic browser launch.'
+        return
+    }
+
+    $profileDir = Join-Path $env:TEMP ("bastion-proxy-{0}" -f $browser.Name.ToLowerInvariant())
+    New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+
+    $arguments = @(
+        '--new-window'
+        "--proxy-server=socks5://127.0.0.1:$ProxyPort"
+        '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost'
+        "--user-data-dir=$profileDir"
+        '--no-first-run'
+        'about:blank'
+    )
+
+    Start-Process -FilePath $browser.Path -ArgumentList $arguments | Out-Null
+    Write-Ok ("Opened {0} with SOCKS5 proxy localhost:{1}" -f $browser.Name, $ProxyPort)
+}
 
 # ── Port utilities ────────────────────────────────────────────────────────────
 
@@ -86,6 +150,12 @@ if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     Write-Err 'Install: https://learn.microsoft.com/cli/azure/install-azure-cli'
     exit 1
 }
+
+if (-not $env:AZURE_EXTENSION_DIR) {
+    $env:AZURE_EXTENSION_DIR = Join-Path $HOME '.azure\cliextensions-bastion-proxy'
+    Write-Info "Using dedicated Azure CLI extension cache: $env:AZURE_EXTENSION_DIR"
+}
+New-Item -ItemType Directory -Force -Path $env:AZURE_EXTENSION_DIR | Out-Null
 
 $null = az extension show --name bastion 2>$null
 if ($LASTEXITCODE -ne 0) {
@@ -132,10 +202,16 @@ Write-Ok 'Authenticated to Azure CLI'
 
 # ── Subscription ──────────────────────────────────────────────────────────────
 
-Write-Info "Switching to subscription $SUBSCRIPTION_ID..."
-az account set --subscription $SUBSCRIPTION_ID 2>&1 | Out-Null
+if ($SubscriptionId) {
+    Write-Info "Switching to subscription $SubscriptionId..."
+    az account set --subscription $SubscriptionId 2>&1 | Out-Null
+}
+else {
+    $SubscriptionId = az account show --query id --output tsv
+    Write-Info 'Using current Azure subscription...'
+}
 $subName = az account show --query name --output tsv
-Write-Ok "Using: $subName ($SUBSCRIPTION_ID)"
+Write-Ok "Using: $subName ($SubscriptionId)"
 
 # ── Resolve VM resource ID ────────────────────────────────────────────────────
 
@@ -156,7 +232,13 @@ $vmState = az vm get-instance-view `
     --output tsv 2>$null
 
 if ($vmState -ne 'VM running') {
-    Write-Warn "VM is not running (current state: $($vmState ?? 'unknown'))"
+    if ([string]::IsNullOrWhiteSpace($vmState)) {
+        $vmStateDisplay = 'unknown'
+    }
+    else {
+        $vmStateDisplay = $vmState
+    }
+    Write-Warn "VM is not running (current state: $vmStateDisplay)"
     $answer = Read-Host '  Start the VM now? [y/N]'
     if ($answer.ToLower() -eq 'y') {
         Write-Info 'Starting VM...'
@@ -218,7 +300,7 @@ if ($socksPort -ne $Port) {
 # ── Print proxy connection details ────────────────────────────────────────────
 
 Write-Host ''
-Write-Host "  SOCKS5 proxy ready on localhost:$socksPort" -ForegroundColor Green -BackgroundColor Black
+Write-Host "  Preparing SOCKS5 proxy on localhost:$socksPort" -ForegroundColor Green -BackgroundColor Black
 Write-Host ''
 Write-Host "  `$env:HTTPS_PROXY = 'socks5://localhost:$socksPort'"
 Write-Host "  `$env:HTTP_PROXY  = 'socks5://localhost:$socksPort'"
@@ -228,6 +310,7 @@ Write-Host ''
 Write-Host "  Session started : $loginAt"
 Write-Host "  Session expires : $expireAt  (Entra ID 12h limit)"
 Write-Host '  You will be warned 1 hour before expiry; the tunnel stops at expiry.'
+Write-Host '  The proxy becomes usable only after the Bastion SSH session starts successfully.'
 Write-Host ''
 Write-Host '  Connecting via Bastion (auth: AAD). Press Ctrl+C to stop.'
 Write-Host ''
@@ -263,38 +346,61 @@ $proc = Start-Process -FilePath 'cmd.exe' `
     -ArgumentList "/c `"$tempBat`"" `
     -NoNewWindow -PassThru
 
+$tunnelReady = $false
+$readyDeadline = (Get-Date).AddSeconds(15)
+while ((Get-Date) -lt $readyDeadline) {
+    if (Test-PortInUse $socksPort) {
+        $tunnelReady = $true
+        break
+    }
+    if ($proc.HasExited) {
+        break
+    }
+    Start-Sleep -Milliseconds 250
+}
+
+if ($tunnelReady) {
+    Write-Ok "SOCKS5 proxy ready on localhost:$socksPort"
+    Start-ProxyBrowser $socksPort
+}
+
 # ── Session expiry timer (background runspace) ────────────────────────────────
 #
 # Runs in a separate runspace so it doesn't block WaitForExit below.
 # On expiry it kills the entire process tree via taskkill /T.
 
-$runspace = [runspacefactory]::CreateRunspace()
-$runspace.Open()
-$rsPs = [powershell]::Create()
-$rsPs.Runspace = $runspace
-$null = $rsPs.AddScript({
-        param([long]$ExpireEpoch, [int]$ProcId)
-        $warned = $false
-        $warnEpoch = $ExpireEpoch - 3600
-        while ($true) {
-            Start-Sleep -Seconds 60
-            $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-            if ($now -ge $ExpireEpoch) {
-                [Console]::Error.WriteLine('')
-                [Console]::Error.WriteLine('[ERROR] Azure CLI session has expired (12h limit). Stopping proxy.')
-                [Console]::Error.WriteLine('[ERROR] Re-run the script to re-authenticate.')
-                $null = & taskkill /F /T /PID $ProcId 2>$null
-                break
+$runspace = $null
+$rsPs = $null
+$timerAsyncResult = $null
+if ($tunnelReady) {
+    $runspace = [runspacefactory]::CreateRunspace()
+    $runspace.Open()
+    $rsPs = [powershell]::Create()
+    $rsPs.Runspace = $runspace
+    $null = $rsPs.AddScript({
+            param([long]$ExpireEpoch, [int]$ProcId)
+            $warned = $false
+            $warnEpoch = $ExpireEpoch - 3600
+            while ($true) {
+                Start-Sleep -Seconds 60
+                $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+                if ($now -ge $ExpireEpoch) {
+                    [Console]::Error.WriteLine('')
+                    [Console]::Error.WriteLine('[ERROR] Azure CLI session has expired (12h limit). Stopping proxy.')
+                    [Console]::Error.WriteLine('[ERROR] Re-run the script to re-authenticate.')
+                    $null = & taskkill /F /T /PID $ProcId 2>$null
+                    break
+                }
+                elseif ($now -ge $warnEpoch -and -not $warned) {
+                    $warned = $true
+                    [Console]::Error.WriteLine('')
+                    [Console]::Error.WriteLine('[WARN]  Azure CLI session expires in ~60 minutes. Restart the script soon.')
+                }
             }
-            elseif ($now -ge $warnEpoch -and -not $warned) {
-                $warned = $true
-                [Console]::Error.WriteLine('')
-                [Console]::Error.WriteLine('[WARN]  Azure CLI session expires in ~60 minutes. Restart the script soon.')
-            }
-        }
-    }).AddParameters(@{ ExpireEpoch = $expireEpoch; ProcId = $proc.Id })
-$timerAsyncResult = $rsPs.BeginInvoke()
-if (-not $timerAsyncResult) { throw 'Failed to start session expiry timer.' }
+        }).AddParameters(@{ ExpireEpoch = $expireEpoch; ProcId = $proc.Id })
+    $timerAsyncResult = $rsPs.BeginInvoke()
+    if (-not $timerAsyncResult) { throw 'Failed to start session expiry timer.' }
+}
 
 # ── Wait for proxy process to exit ────────────────────────────────────────────
 
@@ -304,10 +410,16 @@ try {
 }
 finally {
     # Stop the timer runspace
-    try { $timerAsyncResult.AsyncWaitHandle.Close() } catch {}
-    try { $rsPs.Stop() } catch {}
-    try { $rsPs.Dispose() } catch {}
-    try { $runspace.Dispose() } catch {}
+    if ($timerAsyncResult) {
+        try { $timerAsyncResult.AsyncWaitHandle.Close() } catch {}
+    }
+    if ($rsPs) {
+        try { $rsPs.Stop() } catch {}
+        try { $rsPs.Dispose() } catch {}
+    }
+    if ($runspace) {
+        try { $runspace.Dispose() } catch {}
+    }
 
     # Ensure process tree is dead (idempotent if already exited)
     if (-not $proc.HasExited) {
@@ -318,7 +430,11 @@ finally {
     Remove-Item $tempBat -Force -ErrorAction SilentlyContinue
 
     Write-Host ''
-    if ($null -eq $exitCode -or $exitCode -eq 0 -or $exitCode -eq 130) {
+    if (-not $tunnelReady) {
+        Write-Err "Bastion SSH exited before the SOCKS5 proxy became ready on localhost:$socksPort."
+        Write-Err 'No listener was created. The Azure CLI Bastion/SSH handoff failed before the tunnel came up.'
+    }
+    elseif ($null -eq $exitCode -or $exitCode -eq 0 -or $exitCode -eq 130) {
         Write-Ok 'SOCKS5 proxy stopped.'
     }
     else {

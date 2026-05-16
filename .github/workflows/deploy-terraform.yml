@@ -6,6 +6,14 @@ on:
         description: "Deployment environment, mostly it is single deployment to tools"
         required: true
         default: "tools"
+      terraform_command:
+        description: "Terraform command to run"
+        required: true
+        default: "apply"
+        type: choice
+        options:
+          - apply
+          - destroy
 permissions:
   id-token: write # Required for OIDC authentication
   contents: read
@@ -13,7 +21,7 @@ jobs:
   deploy:
     runs-on: ubuntu-24.04
     environment: ${{ inputs.environment }}
-    name: Deploy to ${{ inputs.environment }}
+    name: Terraform ${{ inputs.terraform_command }} to ${{ inputs.environment }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -33,7 +41,7 @@ jobs:
       - name: Make deploy script executable
         shell: bash
         run: chmod +x ./infra/deploy-terraform.sh
-      - name: Apply Terraform configuration
+      - name: Run Terraform configuration
         id: deploy
         shell: bash
         working-directory: ./infra
@@ -58,4 +66,4 @@ jobs:
           TF_VAR_vnet_address_space: ${{ secrets.VNET_ADDRESS_SPACE }}
         run: |
           set -euo pipefail
-          ./deploy-terraform.sh apply -auto-approve
+          ./deploy-terraform.sh "${{ inputs.terraform_command }}" -auto-approve

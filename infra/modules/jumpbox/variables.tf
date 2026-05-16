@@ -53,13 +53,19 @@ variable "os_disk_size_gb" {
 }
 
 variable "enable_entra_login" {
-  description = "Enable Microsoft Entra ID (AAD) SSH login via the AADSSHLoginForLinux VM extension"
+  description = "Enable Microsoft Entra ID (AAD) SSH login on the Linux jumpbox VM via the AADSSHLoginForLinux VM extension"
   type        = bool
   default     = true
 }
 
+variable "vm_admin_login_group_display_names" {
+  description = "List of Entra group display names to grant Virtual Machine Administrator Login on the Linux jumpbox VM for interactive Entra SSH access"
+  type        = list(string)
+  default     = []
+}
+
 variable "vm_admin_login_principal_ids" {
-  description = "List of Entra group or user object IDs to grant Virtual Machine Administrator Login role on the VM"
+  description = "List of Entra group or user object IDs to grant Virtual Machine Administrator Login on the Linux jumpbox VM for interactive Entra SSH access"
   type        = list(string)
   default     = []
 }

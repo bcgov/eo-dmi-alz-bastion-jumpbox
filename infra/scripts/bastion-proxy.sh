@@ -18,10 +18,13 @@
 #   bastion extension: az extension add --name bastion
 #   ssh extension:     az extension add --name ssh   (AAD auth only)
 #   Standard SKU Azure Bastion with native tunnelling enabled
-#   "Virtual Machine Administrator Login" RBAC role on the VM (AAD auth)
+#   The signing-in Entra user, or a group they belong to, must have
+#   "Virtual Machine Administrator Login" on the Linux jumpbox VM (AAD auth)
 #
 # AUTHENTICATION
 #   Uses normal Azure CLI Entra browser login with MFA.
+#   Entra login alone is not enough; the authenticated user must also be
+#   authorized on the Linux VM through the VM login RBAC assignment.
 #
 # USAGE
 #   ./scripts/bastion-proxy.sh -g <resource-group> -b <bastion-name> -v <vm-name>
@@ -30,12 +33,16 @@
 #   -g, --resource-group    Resource group containing Bastion and VM   [required]
 #   -b, --bastion-name      Name of the Azure Bastion host             [required]
 #   -v, --vm-name           Name of the jumpbox VM                     [required]
+#   -s, --subscription      Azure subscription ID to use               [optional]
 #   -p, --port              Starting SOCKS5 port (default: 8228)       [optional]
 #   -h, --help              Show this help and exit
 #
 # EXAMPLES
 #   # Entra ID (AAD) auth:
-#   ./scripts/bastion-proxy.sh -g tools-rg -b tools-bastion -v tools-jumpbox
+#   ./scripts/bastion-proxy.sh -g eo-dmi-alz-fabric-tunnel-tools -b eo-dmi-alz-fabric-tunnel-bastion -v eo-dmi-alz-fabric-tunnel-jumpbox
+#
+#   # Override the active Azure subscription if needed:
+#   ./scripts/bastion-proxy.sh -g eo-dmi-alz-fabric-tunnel-tools -b eo-dmi-alz-fabric-tunnel-bastion -v eo-dmi-alz-fabric-tunnel-jumpbox -s <subscription-id>
 #
 #   # Derive names from Terraform outputs (run from initial-setup/infra/):
 #   ./scripts/bastion-proxy.sh \
@@ -49,7 +56,6 @@ set -euo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-SUBSCRIPTION_ID="eb733692-257d-40c8-bd7b-372e689f3b7f"
 DEFAULT_SOCKS_PORT=8228
 
 # ── Colours (only when writing to a terminal) ─────────────────────────────────
@@ -67,6 +73,105 @@ err()  { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
 info() { echo -e "${CYAN}[INFO]${RESET}  $*"; }
 ok()   { echo -e "${GREEN}[ OK ]${RESET}  $*"; }
 warn() { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
+
+launch_proxy_browser() {
+  local port=$1
+  local browser_name=""
+  local browser_cmd=""
+  local tmp_root="${TMPDIR:-${TMP:-${TEMP:-/tmp}}}"
+  local profile_dir=""
+
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if command -v powershell.exe &>/dev/null; then
+        browser_name=$(BASTION_PROXY_PORT="$port" powershell.exe -NoProfile -Command '& {
+          $candidates = @(
+            @{
+              Name = "Edge"
+              Paths = @(
+                (Join-Path $env:LocalAppData "Microsoft\Edge\Application\msedge.exe"),
+                (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
+                (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe")
+              )
+            },
+            @{
+              Name = "Chrome"
+              Paths = @(
+                (Join-Path $env:LocalAppData "Google\Chrome\Application\chrome.exe"),
+                (Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"),
+                (Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe")
+              )
+            }
+          )
+          $browser = $null
+          foreach ($candidate in $candidates) {
+            foreach ($path in $candidate.Paths) {
+              if ($path -and (Test-Path $path)) {
+                $browser = [pscustomobject]@{ Name = $candidate.Name; Path = $path }
+                break
+              }
+            }
+            if ($browser) { break }
+          }
+          if (-not $browser) { exit 3 }
+          $profileDir = Join-Path $env:TEMP ("bastion-proxy-" + $browser.Name.ToLowerInvariant())
+          New-Item -ItemType Directory -Force -Path $profileDir | Out-Null
+          $arguments = @(
+            "--new-window",
+            "--proxy-server=socks5://127.0.0.1:$env:BASTION_PROXY_PORT",
+            "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost",
+            "--user-data-dir=$profileDir",
+            "--no-first-run",
+            "about:blank"
+          )
+          Start-Process -FilePath $browser.Path -ArgumentList $arguments | Out-Null
+          Write-Output $browser.Name
+        }' 2>/dev/null | tr -d '\r')
+
+        if [[ -n "$browser_name" ]]; then
+          ok "Opened ${browser_name} with SOCKS5 proxy localhost:${port}"
+          return 0
+        fi
+      fi
+
+      warn "Edge and Chrome were not found. Skipping automatic browser launch."
+      return 0
+      ;;
+  esac
+
+  if command -v microsoft-edge &>/dev/null; then
+    browser_name="Edge"
+    browser_cmd=$(command -v microsoft-edge)
+  elif command -v microsoft-edge-stable &>/dev/null; then
+    browser_name="Edge"
+    browser_cmd=$(command -v microsoft-edge-stable)
+  elif command -v google-chrome &>/dev/null; then
+    browser_name="Chrome"
+    browser_cmd=$(command -v google-chrome)
+  elif command -v google-chrome-stable &>/dev/null; then
+    browser_name="Chrome"
+    browser_cmd=$(command -v google-chrome-stable)
+  elif command -v chromium-browser &>/dev/null; then
+    browser_name="Chrome"
+    browser_cmd=$(command -v chromium-browser)
+  fi
+
+  if [[ -z "$browser_cmd" ]]; then
+    warn "Edge and Chrome were not found. Skipping automatic browser launch."
+    return 0
+  fi
+
+  profile_dir="${tmp_root}/bastion-proxy-${browser_name,,}"
+  mkdir -p "$profile_dir"
+  "$browser_cmd" \
+    --new-window \
+    "--proxy-server=socks5://127.0.0.1:${port}" \
+    '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost' \
+    "--user-data-dir=${profile_dir}" \
+    --no-first-run \
+    about:blank >/dev/null 2>&1 &
+  ok "Opened ${browser_name} with SOCKS5 proxy localhost:${port}"
+}
 
 usage() {
   sed -n '/^# USAGE/,/^# =/p' "$0" | sed 's/^# \?//' | sed '/^=\{5,\}/d'
@@ -105,6 +210,7 @@ find_free_port() {
 RESOURCE_GROUP=""
 BASTION_NAME=""
 VM_NAME=""
+SUBSCRIPTION_ID=""
 START_PORT=$DEFAULT_SOCKS_PORT
 
 while [[ $# -gt 0 ]]; do
@@ -112,6 +218,7 @@ while [[ $# -gt 0 ]]; do
     -g|--resource-group) RESOURCE_GROUP="$2"; shift 2 ;;
     -b|--bastion-name)   BASTION_NAME="$2";   shift 2 ;;
     -v|--vm-name)        VM_NAME="$2";        shift 2 ;;
+    -s|--subscription)   SUBSCRIPTION_ID="$2"; shift 2 ;;
     -p|--port)           START_PORT="$2";     shift 2 ;;
     -h|--help)           usage ;;
     *) err "Unknown argument: $1"; exit 1 ;;
@@ -133,6 +240,13 @@ command -v az &>/dev/null || {
   err "Install: https://learn.microsoft.com/cli/azure/install-azure-cli"
   exit 1
 }
+
+if [[ -z "${AZURE_EXTENSION_DIR:-}" ]]; then
+  AZURE_EXTENSION_DIR="${HOME}/.azure/cliextensions-bastion-proxy"
+  export AZURE_EXTENSION_DIR
+  info "Using dedicated Azure CLI extension cache: ${AZURE_EXTENSION_DIR}"
+fi
+mkdir -p "$AZURE_EXTENSION_DIR"
 
 if ! az extension show --name bastion &>/dev/null 2>&1; then
   info "Installing Azure CLI 'bastion' extension..."
@@ -178,8 +292,13 @@ ok "Authenticated to Azure CLI"
 
 # ── Subscription ──────────────────────────────────────────────────────────────
 
-info "Switching to subscription ${SUBSCRIPTION_ID}..."
-az account set --subscription "$SUBSCRIPTION_ID"
+if [[ -n "$SUBSCRIPTION_ID" ]]; then
+  info "Switching to subscription ${SUBSCRIPTION_ID}..."
+  az account set --subscription "$SUBSCRIPTION_ID"
+else
+  SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+  info "Using current Azure subscription..."
+fi
 SUBSCRIPTION_NAME=$(az account show --query name --output tsv)
 ok "Using: ${SUBSCRIPTION_NAME} (${SUBSCRIPTION_ID})"
 
@@ -272,7 +391,7 @@ fi
 # ── Print proxy connection details ────────────────────────────────────────────
 
 echo ""
-echo -e "  ${BOLD}${GREEN}SOCKS5 proxy ready on localhost:${SOCKS_PORT}${RESET}"
+echo -e "  ${BOLD}${GREEN}Preparing SOCKS5 proxy on localhost:${SOCKS_PORT}${RESET}"
 echo ""
 echo -e "  ${BOLD}export HTTPS_PROXY=socks5://localhost:${SOCKS_PORT}${RESET}"
 echo -e "  ${BOLD}export HTTP_PROXY=socks5://localhost:${SOCKS_PORT}${RESET}"
@@ -282,6 +401,7 @@ echo ""
 echo -e "  ${BOLD}Session started :${RESET} ${LOGIN_AT}"
 echo -e "  ${BOLD}Session expires :${RESET} ${EXPIRE_AT}  (Entra ID 12h limit)"
 echo -e "  You will be warned 1 hour before expiry and the tunnel will stop at expiry."
+echo -e "  The proxy becomes usable only after the Bastion SSH session starts successfully."
 echo ""
 echo -e "  Connecting via Bastion (auth: AAD). Press ${BOLD}Ctrl+C${RESET} to stop."
 echo ""
@@ -333,12 +453,18 @@ _session_timer() {
 # ── Cleanup handler ──────────────────────────────────────────────────────────────────────────────
 
 TIMER_PID=""
+AZ_PID=""
+TUNNEL_READY=false
 
 cleanup() {
   local exit_code=$?
   [[ -n "${TIMER_PID}" ]] && kill "${TIMER_PID}" 2>/dev/null || true
+  [[ -n "${AZ_PID}" ]] && kill "${AZ_PID}" 2>/dev/null || true
   echo ""
-  if [[ $exit_code -eq 0 || $exit_code -eq 130 ]]; then
+  if [[ "$TUNNEL_READY" != "true" ]]; then
+    err "Bastion SSH exited before the SOCKS5 proxy became ready on localhost:${SOCKS_PORT}."
+    err "No listener was created. The Azure CLI Bastion/SSH handoff failed before the tunnel came up."
+  elif [[ $exit_code -eq 0 || $exit_code -eq 130 ]]; then
     ok "SOCKS5 proxy stopped."
   else
     warn "SOCKS5 proxy exited with code $exit_code."
@@ -359,4 +485,22 @@ az network bastion ssh \
   --resource-group "$RESOURCE_GROUP" \
   --target-resource-id "$VM_ID" \
   --auth-type "AAD" \
-  -- $SSH_OPTS
+  -- $SSH_OPTS &
+AZ_PID=$!
+
+while true; do
+  if is_port_in_use "$SOCKS_PORT"; then
+    TUNNEL_READY=true
+    ok "SOCKS5 proxy ready on localhost:${SOCKS_PORT}"
+    launch_proxy_browser "$SOCKS_PORT"
+    break
+  fi
+
+  if ! kill -0 "$AZ_PID" 2>/dev/null; then
+    break
+  fi
+
+  sleep 1
+done
+
+wait "$AZ_PID"
