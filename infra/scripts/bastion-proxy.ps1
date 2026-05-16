@@ -194,7 +194,6 @@ function Start-ProxyBrowser {
     $arguments = @(
         '--new-window'
         "--proxy-server=socks5://127.0.0.1:$ProxyPort"
-        '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost'
         "--user-data-dir=$profileDir"
         '--no-first-run'
         'about:blank'

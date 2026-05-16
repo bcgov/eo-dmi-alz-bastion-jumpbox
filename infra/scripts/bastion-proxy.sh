@@ -122,7 +122,6 @@ launch_proxy_browser() {
           $arguments = @(
             "--new-window",
             "--proxy-server=socks5://127.0.0.1:$env:BASTION_PROXY_PORT",
-            "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost",
             "--user-data-dir=$profileDir",
             "--no-first-run",
             "about:blank"
@@ -169,7 +168,6 @@ launch_proxy_browser() {
   "$browser_cmd" \
     --new-window \
     "--proxy-server=socks5://127.0.0.1:${port}" \
-    '--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE localhost' \
     "--user-data-dir=${profile_dir}" \
     --no-first-run \
     about:blank >/dev/null 2>&1 &
