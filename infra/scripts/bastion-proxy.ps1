@@ -32,6 +32,9 @@
 #   # Override the active Azure subscription if needed:
 #   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-fabric-tunnel-tools -BastionName eo-dmi-alz-fabric-tunnel-bastion -VmName eo-dmi-alz-fabric-tunnel-jumpbox -SubscriptionId <subscription-id>
 #
+#   # Default subscription if omitted:
+#   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c
+#
 # =============================================================================
 
 [CmdletBinding()]
@@ -49,7 +52,7 @@ param(
     [string]$VmName,
 
     [Alias('s')]
-    [string]$SubscriptionId = '',
+    [string]$SubscriptionId = 'ffc5e617-7f2d-4ddb-8b57-33fc43989a8c',
 
     [Alias('p')]
     [int]$Port = 8228

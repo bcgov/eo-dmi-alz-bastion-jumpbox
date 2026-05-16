@@ -185,7 +185,7 @@ chmod +x "$script_path"
 
 Replace `main` with a tag or commit SHA if you want to pin the exact script version instead of following the default branch.
 
-If your current Azure CLI context points to the wrong subscription, run `az account set --subscription <subscription-id>` first or pass `-s/--subscription` to the proxy script.
+If you omit the subscription argument, the proxy scripts default to `ffc5e617-7f2d-4ddb-8b57-33fc43989a8c`. Pass `-SubscriptionId <subscription-id>` in PowerShell or `-s/--subscription <subscription-id>` in Bash to override it.
 
 Before running the proxy, make sure the Entra user you signed in with, or one of their Entra groups, has a manual `Virtual Machine Administrator Login` assignment on the Linux jumpbox VM.
 

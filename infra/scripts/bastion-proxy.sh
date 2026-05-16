@@ -34,7 +34,7 @@
 #   -g, --resource-group    Resource group containing Bastion and VM   [required]
 #   -b, --bastion-name      Name of the Azure Bastion host             [required]
 #   -v, --vm-name           Name of the jumpbox VM                     [required]
-#   -s, --subscription      Azure subscription ID to use               [optional]
+#   -s, --subscription      Azure subscription ID to use               [default: ffc5e617-7f2d-4ddb-8b57-33fc43989a8c]
 #   -p, --port              Starting SOCKS5 port (default: 8228)       [optional]
 #   -h, --help              Show this help and exit
 #
@@ -58,6 +58,7 @@ set -euo pipefail
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 DEFAULT_SOCKS_PORT=8228
+DEFAULT_SUBSCRIPTION_ID="ffc5e617-7f2d-4ddb-8b57-33fc43989a8c"
 
 # ── Colours (only when writing to a terminal) ─────────────────────────────────
 
@@ -212,7 +213,7 @@ find_free_port() {
 RESOURCE_GROUP=""
 BASTION_NAME=""
 VM_NAME=""
-SUBSCRIPTION_ID=""
+SUBSCRIPTION_ID="$DEFAULT_SUBSCRIPTION_ID"
 START_PORT=$DEFAULT_SOCKS_PORT
 
 while [[ $# -gt 0 ]]; do
