@@ -255,7 +255,7 @@ This Bastion-based access pattern aligns with the BC Gov Platform team guidance 
 flowchart LR
   gha["GitHub Actions workflow_dispatch"]
   oidc["GitHub OIDC token"]
-  azureLogin["azure/login@v2"]
+  azureLogin["azure/login@v3"]
   terraform["Terraform apply"]
   rg["Azure resource group"]
   resources["Bastion + jumpbox + automation"]
