@@ -6,6 +6,7 @@ usage() {
   cat <<'EOF'
 Usage: read-kv-secret-via-bastion.sh \
   --resource-group <resource-group> \
+  --key-vault-resource-group <key-vault-resource-group> \
   --key-vault-name <key-vault-name> \
   --secret-name <secret-name>
 
@@ -83,6 +84,7 @@ discover_single_resource_field() {
 }
 
 RESOURCE_GROUP=""
+KEY_VAULT_RESOURCE_GROUP=""
 KEY_VAULT_NAME=""
 SECRET_NAME=""
 SOCKS_PORT="58228"
@@ -91,6 +93,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --resource-group)
       RESOURCE_GROUP="$2"
+      shift 2
+      ;;
+    --key-vault-resource-group)
+      KEY_VAULT_RESOURCE_GROUP="$2"
       shift 2
       ;;
     --key-vault-name)
@@ -117,6 +123,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$RESOURCE_GROUP" ]] || fail "--resource-group is required"
+[[ -n "$KEY_VAULT_RESOURCE_GROUP" ]] || fail "--key-vault-resource-group is required"
 [[ -n "$KEY_VAULT_NAME" ]] || fail "--key-vault-name is required"
 [[ -n "$SECRET_NAME" ]] || fail "--secret-name is required"
 
@@ -155,6 +162,7 @@ VM_NAME=$(discover_single_resource_field "$RESOURCE_GROUP" "Microsoft.Compute/vi
 
 log "Using Bastion host: ${BASTION_NAME}"
 log "Using jumpbox VM: ${VM_NAME}"
+log "Using Key Vault resource group: ${KEY_VAULT_RESOURCE_GROUP}"
 
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
