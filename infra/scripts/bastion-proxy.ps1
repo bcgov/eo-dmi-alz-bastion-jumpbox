@@ -219,6 +219,19 @@ function Find-FreePort {
     exit 1
 }
 
+function Write-ListenerSnapshot {
+    param([int]$SnapshotPort)
+
+    $snapshot = netstat -ano 2>$null | Select-String "TCP\s+[0-9.:]+:${SnapshotPort}\s+[0-9.:]+\s+LISTENING"
+    if ($snapshot) {
+        Write-Info "Listener snapshot for port ${SnapshotPort}:"
+        $snapshot | ForEach-Object { Write-Host $_.ToString() }
+    }
+    else {
+        Write-Info "No listener snapshot found for port $SnapshotPort yet."
+    }
+}
+
 # ── Prerequisite checks ───────────────────────────────────────────────────────
 
 Write-Info 'Checking prerequisites...'
@@ -421,6 +434,10 @@ $azCmdLine = "network bastion ssh --name `"$BastionName`" --resource-group `"$Re
 $tempBat = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), '.bat')
 "@az $azCmdLine" | Set-Content -Path $tempBat -Encoding ASCII
 
+Write-Info "Prepared Azure Bastion SSH command file: $tempBat"
+Write-Info "Launching Azure Bastion SSH tunnel for VM resource ID: $vmId"
+Write-Info "SSH forwarding arguments: $sshOptsStr"
+
 # ── Start az process (inherit console so output flows through) ────────────────
 #
 # Start-Process with -NoNewWindow and no stream redirection means the child
@@ -431,22 +448,36 @@ $proc = Start-Process -FilePath 'cmd.exe' `
     -ArgumentList "/c `"$tempBat`"" `
     -NoNewWindow -PassThru
 
+Write-Info "Azure Bastion SSH process started with PID $($proc.Id). Waiting for SOCKS listener on localhost:$socksPort..."
+
 $tunnelReady = $false
-$readyDeadline = (Get-Date).AddSeconds(15)
-while ((Get-Date) -lt $readyDeadline) {
+$waitStartedAt = Get-Date
+$lastWaitLogAt = -1
+$snapshotLogged = $false
+while ($true) {
     if (Test-PortInUse $socksPort) {
         $tunnelReady = $true
+        Write-Ok "SOCKS5 proxy ready on localhost:$socksPort"
+        Start-ProxyBrowser $socksPort
         break
     }
-    if ($proc.HasExited) {
-        break
-    }
-    Start-Sleep -Milliseconds 250
-}
 
-if ($tunnelReady) {
-    Write-Ok "SOCKS5 proxy ready on localhost:$socksPort"
-    Start-ProxyBrowser $socksPort
+    if ($proc.HasExited) {
+        Write-Warn "Azure Bastion SSH process $($proc.Id) exited before the SOCKS listener was detected."
+        break
+    }
+
+    $waitElapsed = [int]((Get-Date) - $waitStartedAt).TotalSeconds
+    if ($waitElapsed -ge 5 -and $waitElapsed -ne $lastWaitLogAt -and $waitElapsed % 5 -eq 0) {
+        $lastWaitLogAt = $waitElapsed
+        Write-Info "Still waiting for SOCKS listener on localhost:$socksPort after ${waitElapsed}s (az pid $($proc.Id) still running)."
+        if (-not $snapshotLogged) {
+            Write-ListenerSnapshot -SnapshotPort $socksPort
+            $snapshotLogged = $true
+        }
+    }
+
+    Start-Sleep -Milliseconds 250
 }
 
 # ── Session expiry timer (background runspace) ────────────────────────────────
@@ -492,6 +523,7 @@ if ($tunnelReady) {
 try {
     $proc.WaitForExit()
     $exitCode = $proc.ExitCode
+    Write-Info "Azure Bastion SSH process $($proc.Id) exited with code $exitCode."
 }
 finally {
     # Stop the timer runspace
@@ -518,6 +550,9 @@ finally {
     if (-not $tunnelReady) {
         Write-Err "Bastion SSH exited before the SOCKS5 proxy became ready on localhost:$socksPort."
         Write-Err 'No listener was created. The Azure CLI Bastion/SSH handoff failed before the tunnel came up.'
+        if ($null -ne $exitCode) {
+            Write-Warn "Bastion SSH process exit code: $exitCode"
+        }
     }
     elseif ($null -eq $exitCode -or $exitCode -eq 0 -or $exitCode -eq 130) {
         Write-Ok 'SOCKS5 proxy stopped.'

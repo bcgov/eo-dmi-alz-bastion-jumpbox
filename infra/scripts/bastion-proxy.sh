@@ -452,10 +452,29 @@ _session_timer() {
   done
 }
 
+log_listener_snapshot() {
+  local port=$1
+  local snapshot=""
+
+  if command -v ss &>/dev/null; then
+    snapshot=$(ss -tln 2>/dev/null | grep -E ":${port}[[:space:]]" || true)
+  elif command -v netstat &>/dev/null; then
+    snapshot=$(netstat -ano 2>/dev/null | tr -d '\r' | grep -E ":${port}[[:space:]]" || true)
+  fi
+
+  if [[ -n "$snapshot" ]]; then
+    info "Listener snapshot for port ${port}:"
+    echo "$snapshot"
+  else
+    info "No listener snapshot found for port ${port} yet."
+  fi
+}
+
 # ── Cleanup handler ──────────────────────────────────────────────────────────────────────────────
 
 TIMER_PID=""
 AZ_PID=""
+AZ_EXIT_CODE=""
 TUNNEL_READY=false
 
 cleanup() {
@@ -466,6 +485,7 @@ cleanup() {
   if [[ "$TUNNEL_READY" != "true" ]]; then
     err "Bastion SSH exited before the SOCKS5 proxy became ready on localhost:${SOCKS_PORT}."
     err "No listener was created. The Azure CLI Bastion/SSH handoff failed before the tunnel came up."
+    [[ -n "$AZ_EXIT_CODE" ]] && warn "Bastion SSH process exit code: ${AZ_EXIT_CODE}."
   elif [[ $exit_code -eq 0 || $exit_code -eq 130 ]]; then
     ok "SOCKS5 proxy stopped."
   else
@@ -480,11 +500,15 @@ trap cleanup EXIT
 # --ssh-args are forwarded to the underlying SSH client unchanged.
 # The process blocks until the connection is closed (Ctrl+C).
 # Start the session expiry timer in the background before the tunnel blocks.
+info "Starting session expiry timer..."
 _session_timer "$EXPIRE_EPOCH" "$$" &
 TIMER_PID=$!
+info "Session expiry timer started with PID ${TIMER_PID}."
 # Git Bash/MSYS rewrites arguments that look like Unix paths when calling
 # Windows executables. Azure resource IDs begin with /subscriptions/... and
 # must be passed through unchanged.
+info "Launching Azure Bastion SSH tunnel for VM resource ID: ${VM_ID}"
+info "SSH forwarding arguments: ${SSH_OPTS}"
 MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' az network bastion ssh \
   --name "$BASTION_NAME" \
   --resource-group "$RESOURCE_GROUP" \
@@ -492,6 +516,11 @@ MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' az network bastion ssh \
   --auth-type "AAD" \
   -- $SSH_OPTS &
 AZ_PID=$!
+info "Azure Bastion SSH process started with PID ${AZ_PID}. Waiting for SOCKS listener on localhost:${SOCKS_PORT}..."
+
+WAIT_STARTED_AT=$(date +%s)
+LAST_WAIT_LOG=0
+SNAPSHOT_LOGGED=false
 
 while true; do
   if is_port_in_use "$SOCKS_PORT"; then
@@ -502,10 +531,28 @@ while true; do
   fi
 
   if ! kill -0 "$AZ_PID" 2>/dev/null; then
+    warn "Azure Bastion SSH process ${AZ_PID} is no longer running before the SOCKS listener was detected."
     break
+  fi
+
+  WAIT_ELAPSED=$(( $(date +%s) - WAIT_STARTED_AT ))
+  if (( WAIT_ELAPSED >= 5 && WAIT_ELAPSED != LAST_WAIT_LOG && WAIT_ELAPSED % 5 == 0 )); then
+    LAST_WAIT_LOG=$WAIT_ELAPSED
+    info "Still waiting for SOCKS listener on localhost:${SOCKS_PORT} after ${WAIT_ELAPSED}s (az pid ${AZ_PID} still running)."
+    if [[ "$SNAPSHOT_LOGGED" != "true" ]]; then
+      log_listener_snapshot "$SOCKS_PORT"
+      SNAPSHOT_LOGGED=true
+    fi
   fi
 
   sleep 1
 done
 
-wait "$AZ_PID"
+if wait "$AZ_PID"; then
+  AZ_EXIT_CODE=0
+else
+  AZ_EXIT_CODE=$?
+fi
+
+info "Azure Bastion SSH process ${AZ_PID} exited with code ${AZ_EXIT_CODE}."
+exit "$AZ_EXIT_CODE"
