@@ -107,8 +107,8 @@ resource "azurerm_dev_test_global_vm_shutdown_schedule" "jumpbox" {
   virtual_machine_id    = azurerm_linux_virtual_machine.jumpbox.id
   location              = var.location
   enabled               = true
-  daily_recurrence_time = "1900"
-  timezone              = "Pacific Standard Time"
+  daily_recurrence_time = "0200" # 7 PM Pacific with the repo's +7 offset becomes 02:00 UTC the next day
+  timezone              = "UTC"
 
   notification_settings {
     enabled = false
@@ -217,14 +217,20 @@ resource "azurerm_automation_runbook" "delete_bastion" {
   }
 }
 
+locals {
+  automation_schedule_timezone             = "UTC"
+  automation_weekday_start_time_utc        = "15:00:00Z"
+  automation_daily_delete_bastion_time_utc = "02:00:00Z"
+}
+
 resource "azurerm_automation_schedule" "weekday_start" {
   name                    = "Weekday-8AM-Start"
   resource_group_name     = var.resource_group_name
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Week"
   interval                = 1
-  timezone                = "America/Vancouver"
-  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T08:00:00Z"
+  timezone                = local.automation_schedule_timezone
+  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T${local.automation_weekday_start_time_utc}"
   week_days               = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
   lifecycle {
@@ -246,8 +252,8 @@ resource "azurerm_automation_schedule" "weekday_create_bastion" {
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Week"
   interval                = 1
-  timezone                = "America/Vancouver"
-  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T08:00:00Z"
+  timezone                = local.automation_schedule_timezone
+  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T${local.automation_weekday_start_time_utc}"
   week_days               = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
   lifecycle {
@@ -270,8 +276,8 @@ resource "azurerm_automation_schedule" "daily_delete_bastion" {
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Day"
   interval                = 1
-  timezone                = "America/Vancouver"
-  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T19:00:00Z"
+  timezone                = local.automation_schedule_timezone
+  start_time              = "${formatdate("YYYY-MM-DD", timeadd(timestamp(), "24h"))}T${local.automation_daily_delete_bastion_time_utc}"
 
   lifecycle {
     ignore_changes = [start_time]

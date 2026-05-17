@@ -193,7 +193,7 @@ Terraform under `infra/` deploys:
 - Entra ID SSH login extension on the jumpbox
 - RBAC for configured Entra users or groups
 - Daily auto-shutdown at 7 PM Pacific
-- Weekday auto-start at 8 AM Pacific (Azure Automation)
+- Weekday auto-start at 15:00 UTC (Azure Automation, equivalent to 8 AM Pacific with the repo's +7 offset)
 
 > **Security highlight:** No SSH key pair is generated, stored, output, or used for normal access.
 
@@ -315,19 +315,21 @@ Point your client at `127.0.0.1:16379`. For Azure Cache for Redis, use **TLS on 
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Running: Weekday 8 AM Pacific<br/>Azure Automation runbook
+  [*] --> Running: Weekday 15:00 UTC<br/>Azure Automation runbook
   Running --> Deallocated: Daily 7 PM Pacific<br/>DevTest shutdown schedule
   Deallocated --> Running: Developer starts VM<br/>proxy script prompt or Azure Portal
-  Deallocated --> Running: Next weekday 8 AM Pacific
+  Deallocated --> Running: Next weekday 15:00 UTC
 ```
 
 | Event | When |
 |---|---|
-| Auto-start | 8 AM Pacific, Monday–Friday |
+| Auto-start | 15:00 UTC, Monday–Friday |
 | Auto-shutdown | 7 PM Pacific, daily |
 | Weekend default | VM stays stopped unless started manually |
 
 > Bastion is billed continuously while it exists; VM cost is separate and only accrues while the VM is running.
+>
+> Azure Automation schedules are configured in UTC in this repo. The weekday start time is `15:00 UTC`, and optional Bastion delete/recreate automation uses `02:00 UTC` for delete and `15:00 UTC` for create, matching the requested `+7` Pacific offset.
 
 ---
 

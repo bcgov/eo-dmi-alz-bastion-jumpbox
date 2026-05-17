@@ -52,7 +52,7 @@ This module deploys a minimal Azure Linux VM used as an Azure Bastion native-cli
 - **Managed Identity**: Access Azure services without storing credentials
 - **Random Admin Username**: 12-char alphanumeric username for added security
 - **Auto-Shutdown**: VM automatically shuts down at 7 PM PST daily
-- **Auto-Start**: VM automatically starts at 8 AM PST Monday-Friday using Azure Automation
+- **Auto-Start**: VM automatically starts at 15:00 UTC Monday-Friday using Azure Automation, which matches 8 AM Pacific with the repo's +7 offset
 
 ## VM Schedule
 
@@ -61,13 +61,13 @@ The Jumpbox VM has automatic scheduling to minimize costs:
 | Action | Time | Days | Mechanism |
 |--------|------|------|-----------|
 | **Auto-Shutdown** | 7:00 PM PST | Daily (including weekends) | Azure DevTest Labs Schedule |
-| **Auto-Start** | 8:00 AM PST | Monday-Friday only | Azure Automation Runbook (Python3) |
+| **Auto-Start** | 15:00 UTC | Monday-Friday only | Azure Automation Runbook (Python3) |
 
 ### Schedule Details
 
-- **Weekdays (Mon-Fri)**: VM runs from 8 AM to 7 PM PST
+- **Weekdays (Mon-Fri)**: Azure Automation starts the VM at 15:00 UTC, which maps to 8 AM Pacific with the repo's +7 offset
 - **Weekends (Sat-Sun)**: VM stays off unless manually started
-- **Time Zone**: Pacific Standard Time (PST/PDT)
+- **Time Zones**: Azure Automation schedules use UTC; the VM shutdown schedule remains Pacific time because it is an Azure DevTest Labs schedule
 
 ### Manual Override
 
@@ -296,7 +296,7 @@ The auto-start feature uses Azure Automation with a Python3 runbook:
 
 - **Automation Account**: System-assigned managed identity with VM Contributor role scoped to the jumpbox VM
 - **Runbook**: Python3 script using Azure REST API and the Automation Account managed identity
-- **Schedule**: Weekday mornings at 8 AM PST (Monday-Friday)
+- **Schedule**: Weekday mornings at 15:00 UTC (Monday-Friday), matching 8 AM Pacific with the repo's +7 offset
 
 This does not add SSH keys or alternative VM login methods. It only grants the Automation Account permission to start the VM.
 
@@ -304,7 +304,7 @@ Optional Bastion cost automation can use the same Automation Account when `enabl
 
 - **Create Runbook**: `Create-BastionHost` recreates the Bastion host and its public IP
 - **Delete Runbook**: `Delete-BastionHost` deletes the Bastion host and its public IP
-- **Schedules**: Weekday 8 AM Pacific create, daily 7 PM Pacific delete
+- **Schedules**: Weekday `15:00 UTC` create, daily `02:00 UTC` delete
 - **Manual Recovery**: You can start `Create-BastionHost` manually from Azure Automation to bring Bastion back on demand
 
 Because Bastion delete and recreate happens outside Terraform, an off-hours `terraform plan` will show Bastion as absent and ready to recreate. Once the runbook recreates Bastion with the same names, Terraform returns to the expected state.
@@ -407,8 +407,8 @@ name: Bastion Cost Scheduler
 
 on:
   schedule:
-    # Delete at 7 PM PST (3 AM UTC next day)
-    - cron: '0 3 * * *'
+    # Delete at 7 PM Pacific using the repo's +7 offset (2 AM UTC next day)
+    - cron: '0 2 * * *'
   workflow_dispatch:
     inputs:
       action:
