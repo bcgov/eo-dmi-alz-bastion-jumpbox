@@ -123,7 +123,7 @@ For the `b9cee3` tools environment, make this a manual VM step for:
 - `DO_PuC_Azure_Live_b9cee3_Owners`
 - `DO_PuC_Azure_Live_b9cee3_Contributors`
 
-Terraform creates a bootstrap SSH key internally because Azure requires an `admin_ssh_key` for Linux VM creation when password authentication is disabled. There is no local key file, but the private key is retained in Terraform state and exposed as a sensitive output for break-glass recovery. Interactive access is still expected to use Entra ID through Azure Bastion.
+Terraform still creates a bootstrap SSH public key internally because Azure requires an `admin_ssh_key` for Linux VM creation when password authentication is disabled. This repo does not expose a bootstrap private key for break-glass access. Interactive access is expected to use Entra ID through Azure Bastion, and the jumpbox can be recreated if the Entra-only access path ever needs to be reset.
 
 ## SOCKS5 Proxy for Private PaaS Access
 
@@ -160,6 +160,10 @@ tunnel configuration is needed.
 >
 > Sign in with `az login` and complete the MFA prompt in the browser window
 > opened by Azure CLI. The Entra user you sign in with, or one of their groups, must also have a manual `Virtual Machine Administrator Login` assignment on the Linux jumpbox VM.
+
+> **Do not enable Just-In-Time VM access**
+>
+> Do not click `Configure JIT + Request access` on this VM. This jumpbox uses Azure Bastion plus Entra ID only, and JIT can create `MicrosoftDefenderForCloud-JITRule*` NSG deny rules that interfere with Bastion SSH access. If JIT is enabled accidentally, remove those Defender JIT rules and reconnect through `Connect -> Bastion`.
 
 ```bash
 # Prerequisites (one-time setup)

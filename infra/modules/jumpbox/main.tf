@@ -37,9 +37,7 @@ resource "azapi_resource_action" "bootstrap_ssh_keypair" {
   action      = "generateKeyPair"
   method      = "POST"
 
-  # Keep the private key in Terraform state for break-glass retrieval, but do
-  # not write it to disk.
-  response_export_values = ["publicKey", "privateKey"]
+  response_export_values = ["publicKey"]
 }
 
 resource "azurerm_network_interface" "jumpbox" {

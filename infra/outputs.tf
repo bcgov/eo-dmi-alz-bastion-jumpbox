@@ -13,14 +13,6 @@ output "jumpbox_admin_username" {
   value       = var.enable_jumpbox ? module.jumpbox[0].admin_username : null
 }
 
-output "jumpbox_bootstrap_ssh_private_key" {
-  description = "Bootstrap SSH private key retained in Terraform state for break-glass access"
-  value       = var.enable_jumpbox ? module.jumpbox[0].bootstrap_ssh_private_key : null
-  sensitive   = true
-}
-
-
-
 output "jumpbox_auto_shutdown_time" {
   description = "Auto-shutdown time (PST)"
   value       = var.enable_jumpbox ? module.jumpbox[0].auto_shutdown_time : null
