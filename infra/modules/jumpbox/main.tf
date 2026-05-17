@@ -248,7 +248,7 @@ locals {
 }
 
 resource "azurerm_automation_schedule" "weekday_start" {
-  name                    = "Weekday-8AM-Start"
+  name                    = "Weekday-1500UTC-Start"
   resource_group_name     = var.resource_group_name
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Week"
@@ -271,7 +271,7 @@ resource "azurerm_automation_job_schedule" "start_vm" {
 
 resource "azurerm_automation_schedule" "weekday_create_bastion" {
   count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Weekday-8AM-Create-Bastion"
+  name                    = "Weekday-1500UTC-Create-Bastion"
   resource_group_name     = var.resource_group_name
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Week"
@@ -295,7 +295,7 @@ resource "azurerm_automation_job_schedule" "create_bastion" {
 
 resource "azurerm_automation_schedule" "daily_delete_bastion" {
   count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Daily-7PM-Delete-Bastion"
+  name                    = "Daily-0200UTC-Delete-Bastion"
   resource_group_name     = var.resource_group_name
   automation_account_name = azurerm_automation_account.jumpbox.name
   frequency               = "Day"
