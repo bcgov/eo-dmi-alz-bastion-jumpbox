@@ -275,6 +275,76 @@ flowchart LR
     vm --> other
 ```
 
+## Use Native Tunneling For Data Clients
+
+Azure Bastion native tunneling is not limited to browser access. The same jumpbox path can expose private TCP services to local client tools so developers can perform normal data operations from their workstation without opening those services publicly.
+
+Typical examples:
+
+- PostgreSQL with DBeaver, `psql`, Azure Data Studio, or migration tools
+- Redis with `redis-cli`, application debug tooling, or cache inspection utilities
+- Any other TCP-based private endpoint that the jumpbox can reach inside the VNet
+
+There are two useful tunneling patterns:
+
+- Dynamic SOCKS proxy with `ssh -D` for browsers or client tools that support SOCKS5 directly
+- Local TCP port forward with `ssh -L` for service-specific tools that expect a normal host and port
+
+PostgreSQL example:
+
+```powershell
+$vmId = az vm show `
+  --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-fabric-tunnel-tools `
+  --name eo-dmi-alz-fabric-tunnel-jumpbox `
+  --query id `
+  --output tsv
+
+az network bastion ssh `
+  --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name eo-dmi-alz-fabric-tunnel-bastion `
+  --resource-group eo-dmi-alz-fabric-tunnel-tools `
+  --target-resource-id $vmId `
+  --auth-type AAD `
+  -- -L 127.0.0.1:15432:<postgres-private-hostname-or-ip>:5432 -N -o StrictHostKeyChecking=no
+```
+
+After the tunnel is up, point the local client at `127.0.0.1:15432`.
+
+- DBeaver host: `127.0.0.1`
+- DBeaver port: `15432`
+- SSL: use the normal PostgreSQL SSL mode required by the target service, commonly `require`
+
+Redis example:
+
+```powershell
+$vmId = az vm show `
+  --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-fabric-tunnel-tools `
+  --name eo-dmi-alz-fabric-tunnel-jumpbox `
+  --query id `
+  --output tsv
+
+az network bastion ssh `
+  --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name eo-dmi-alz-fabric-tunnel-bastion `
+  --resource-group eo-dmi-alz-fabric-tunnel-tools `
+  --target-resource-id $vmId `
+  --auth-type AAD `
+  -- -L 127.0.0.1:16379:<redis-private-hostname-or-ip>:6380 -N -o StrictHostKeyChecking=no
+```
+
+After the tunnel is up, point the local client at `127.0.0.1:16379`. For Azure Cache for Redis, prefer TLS on port `6380` unless the target service explicitly uses a different port or configuration.
+
+Notes:
+
+<u>IMPORTANT: DIFFERENT SPOKES ARE NOT NATIVELY CONNECTED. IF THE BASTION/JUMPBOX AND THE TARGET RESOURCE ARE IN DIFFERENT SUBSCRIPTIONS OR DIFFERENT SPOKE VNETS, THE REQUIRED NETWORK PATH MUST ALREADY BE OPEN.</u>
+
+- Use the private service FQDN when private DNS resolves correctly from the jumpbox VNet.
+- If you are testing connectivity and suspect a DNS issue, use the private endpoint IP first to separate name resolution from network reachability.
+- If the Bastion tunnel opens but the client times out, the problem is usually the jumpbox-to-service network path or private DNS, not the local workstation.
+- Keep the `az network bastion ssh` session running while the local data client is connected.
+
 ## VM Schedule
 
 ```mermaid
