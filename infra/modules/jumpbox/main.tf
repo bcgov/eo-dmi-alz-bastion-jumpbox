@@ -67,6 +67,10 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
   admin_username                  = random_string.admin_username.result
   disable_password_authentication = true
   priority                        = "Regular"
+  provision_vm_agent              = true
+  patch_mode                      = "AutomaticByPlatform"
+  patch_assessment_mode           = "AutomaticByPlatform"
+  reboot_setting                  = "IfRequired"
 
   network_interface_ids = [
     azurerm_network_interface.jumpbox.id,
@@ -93,6 +97,9 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
   identity {
     type = "SystemAssigned"
   }
+
+  # Keep platform guest patching and Update Manager assessment enabled to meet
+  # ALZ guardrail expectations for VM compliance visibility.
 
   tags = var.common_tags
   lifecycle {
@@ -136,14 +143,29 @@ resource "azurerm_automation_account" "jumpbox" {
   }
 }
 
+resource "azurerm_automation_runtime_environment" "python" {
+  name                  = "${var.app_name}-python-310"
+  automation_account_id = azurerm_automation_account.jumpbox.id
+  runtime_language      = "Python"
+  runtime_version       = "3.10"
+  location              = var.location
+  description           = "Python 3.10 runtime environment for jumpbox automation runbooks"
+
+  tags = var.common_tags
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
 resource "azurerm_automation_runbook" "start_vm" {
-  name                    = "Start-JumpboxVM"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = false
-  log_progress            = false
-  runbook_type            = "Python3"
+  name                     = "Start-JumpboxVM"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = false
+  log_progress             = false
+  runbook_type             = "Python3"
+  runtime_environment_name = azurerm_automation_runtime_environment.python.name
 
   content = templatefile("${path.module}/scripts/start_vm.py", {
     subscription_id     = data.azurerm_subscription.current.subscription_id
@@ -158,14 +180,15 @@ resource "azurerm_automation_runbook" "start_vm" {
 }
 
 resource "azurerm_automation_runbook" "create_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Create-BastionHost"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = false
-  log_progress            = false
-  runbook_type            = "Python3"
+  count                    = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
+  name                     = "Create-BastionHost"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = false
+  log_progress             = false
+  runbook_type             = "Python3"
+  runtime_environment_name = azurerm_automation_runtime_environment.python.name
 
   content = templatefile("${path.module}/scripts/create_bastion.py", {
     subscription_id                           = data.azurerm_subscription.current.subscription_id
@@ -196,14 +219,15 @@ resource "azurerm_automation_runbook" "create_bastion" {
 }
 
 resource "azurerm_automation_runbook" "delete_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Delete-BastionHost"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = false
-  log_progress            = false
-  runbook_type            = "Python3"
+  count                    = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
+  name                     = "Delete-BastionHost"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = false
+  log_progress             = false
+  runbook_type             = "Python3"
+  runtime_environment_name = azurerm_automation_runtime_environment.python.name
 
   content = templatefile("${path.module}/scripts/delete_bastion.py", {
     subscription_id     = data.azurerm_subscription.current.subscription_id

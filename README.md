@@ -2,6 +2,8 @@
 
 A small **Azure Bastion** access path so developers can reach private Azure endpoints from their workstation — **no VPN, no public IPs, no SSH keys**. Works for both **browsers** (SOCKS5 dynamic proxy) and **native TCP clients** like `psql`, DBeaver, or `redis-cli` (local port forward). Authentication is **Entra ID + MFA** only.
 
+The jumpbox VM is configured with **Automatic VM Guest Patching** and **Azure Update Manager periodic assessment** so update compliance is visible in line with ALZ guardrail expectations.
+
 > **TL;DR** — Install the Azure CLI extensions, run `az login`, run the proxy script, then point a dedicated browser profile at `socks5://127.0.0.1:8228`. For database / cache clients see [Native tunneling for data clients](#native-tunneling-for-data-clients).
 
 ---

@@ -49,6 +49,8 @@ This module deploys a minimal Azure Linux VM used as an Azure Bastion native-cli
 - **Minimal VM**: No desktop environment or DevOps tool installation; the VM exists only as a tunnel endpoint
 - **Azure Bastion**: Secure SSH access without public IP on VM (Standard SKU with native CLI tunneling)
 - **Entra ID SSH Login**: Microsoft Entra ID (AAD) authentication via `AADSSHLoginForLinux` VM extension; developer access uses Entra ID rather than SSH key sign-in, but the signing-in user or one of their groups must also have a manual `Virtual Machine Administrator Login` assignment on the Linux jumpbox VM
+- **Automatic VM Guest Patching**: Enabled with `AutomaticByPlatform` orchestration on the VM resource
+- **Azure Update Manager Compliance Reporting**: Periodic assessment is enabled so the VM appears in native Update Manager compliance views without extra onboarding infrastructure
 - **Managed Identity**: Access Azure services without storing credentials
 - **Random Admin Username**: 12-char alphanumeric username for added security
 - **Auto-Shutdown**: VM automatically shuts down at 7 PM PST daily
