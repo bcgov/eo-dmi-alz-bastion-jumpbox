@@ -32,9 +32,29 @@ The jumpbox VM is configured with **Automatic VM Guest Patching** and **Azure Up
 
 ### 1. Sign in to Azure
 
+Replace the placeholders in the examples below with values from your environment.
+
+| Placeholder | Meaning | Example for this repo deployment |
+|---|---|---|
+| `<tenant-id>` | Microsoft Entra tenant used for `az login` | Use your tenant ID |
+| `<subscription-id>` | Azure subscription that contains the Bastion and jumpbox | `ffc5e617-7f2d-4ddb-8b57-33fc43989a8c` |
+| `<resource-group>` | Resource group that contains the Bastion and jumpbox | `eo-dmi-alz-bastion-jumpbox-tools` |
+| `<bastion-name>` | Azure Bastion host name | `eo-dmi-alz-bastion-jumpbox-bastion` |
+| `<vm-name>` | Jumpbox VM name | `eo-dmi-alz-bastion-jumpbox-jumpbox` |
+| `<repo-owner>` | GitHub owner or org for raw script execution | `bcgov` |
+| `<repo-name>` | GitHub repository name for raw script execution | `eo-dmi-alz-bastion-jumpbox` |
+| `<ref>` | Branch, tag, or commit for raw script execution | `main` |
+
 ```bash
 az login --tenant <tenant-id>
-az account set --subscription eb733692-257d-40c8-bd7b-372e689f3b7f
+az account set --subscription <subscription-id>
+```
+
+Example for this repo deployment:
+
+```bash
+az login
+az account set --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c
 ```
 
 A browser opens for MFA. Only browser-based Entra login is supported.
@@ -47,25 +67,25 @@ If script execution is already allowed in your shell:
 
 ```powershell
 .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+  -ResourceGroup <resource-group> `
+  -BastionName   <bastion-name> `
+  -VmName        <vm-name>
 ```
 
 If Windows execution policy blocks local scripts, run it with an explicit bypass:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+  -ResourceGroup <resource-group> `
+  -BastionName   <bastion-name> `
+  -VmName        <vm-name>
 ```
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+  -ResourceGroup <resource-group> `
+  -BastionName   <bastion-name> `
+  -VmName        <vm-name>
 ```
 
 **macOS / Linux or Git Bash (from the repo root):**
@@ -74,12 +94,74 @@ If the script is executable:
 
 ```bash
 ./infra/scripts/bastion-proxy.sh \
-  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
-  --bastion-name   eo-dmi-alz-bastion-jumpbox-bastion \
-  --vm-name        eo-dmi-alz-bastion-jumpbox-jumpbox
+  --resource-group <resource-group> \
+  --bastion-name   <bastion-name> \
+  --vm-name        <vm-name>
 ```
 
 If you prefer not to rely on the executable bit, invoke it explicitly with Bash:
+
+```bash
+bash ./infra/scripts/bastion-proxy.sh \
+  --resource-group <resource-group> \
+  --bastion-name   <bastion-name> \
+  --vm-name        <vm-name>
+```
+
+**Run directly from GitHub without cloning the repo:**
+
+PowerShell 7:
+
+```powershell
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) 'bastion-proxy.ps1'
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/<repo-owner>/<repo-name>/<ref>/infra/scripts/bastion-proxy.ps1' -OutFile $tmp
+try {
+  pwsh -ExecutionPolicy Bypass -File $tmp `
+    -ResourceGroup <resource-group> `
+    -BastionName   <bastion-name> `
+    -VmName        <vm-name>
+}
+finally {
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+}
+```
+
+Windows PowerShell:
+
+```powershell
+$tmp = Join-Path $env:TEMP 'bastion-proxy.ps1'
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/<repo-owner>/<repo-name>/<ref>/infra/scripts/bastion-proxy.ps1' -OutFile $tmp
+try {
+  powershell.exe -ExecutionPolicy Bypass -File $tmp `
+    -ResourceGroup <resource-group> `
+    -BastionName   <bastion-name> `
+    -VmName        <vm-name>
+}
+finally {
+  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+}
+```
+
+Bash:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/<repo-owner>/<repo-name>/<ref>/infra/scripts/bastion-proxy.sh \
+  | bash -s -- \
+    --resource-group <resource-group> \
+    --bastion-name <bastion-name> \
+    --vm-name <vm-name>
+```
+
+Replace `<ref>` with a tag or commit SHA if you want to pin the script version.
+
+Example commands for this repo deployment:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
+  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
+  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
+  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+```
 
 ```bash
 bash ./infra/scripts/bastion-proxy.sh \
@@ -87,10 +169,6 @@ bash ./infra/scripts/bastion-proxy.sh \
   --bastion-name   eo-dmi-alz-bastion-jumpbox-bastion \
   --vm-name        eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
-
-**Run directly from GitHub without cloning the repo:**
-
-PowerShell 7:
 
 ```powershell
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) 'bastion-proxy.ps1'
@@ -106,24 +184,6 @@ finally {
 }
 ```
 
-Windows PowerShell:
-
-```powershell
-$tmp = Join-Path $env:TEMP 'bastion-proxy.ps1'
-Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/bcgov/eo-dmi-alz-bastion-jumpbox/main/infra/scripts/bastion-proxy.ps1' -OutFile $tmp
-try {
-  powershell.exe -ExecutionPolicy Bypass -File $tmp `
-    -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-    -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-    -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
-}
-finally {
-  Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-}
-```
-
-Bash:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bcgov/eo-dmi-alz-bastion-jumpbox/main/infra/scripts/bastion-proxy.sh \
   | bash -s -- \
@@ -131,8 +191,6 @@ curl -fsSL https://raw.githubusercontent.com/bcgov/eo-dmi-alz-bastion-jumpbox/ma
     --bastion-name eo-dmi-alz-bastion-jumpbox-bastion \
     --vm-name eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
-
-Replace `main` with a tag or commit SHA if you want to pin the script version.
 
 The PowerShell examples download the script to a temporary `.ps1` file first and then execute it with `-File`. This avoids quoting and variable-expansion problems when the command is pasted into an existing PowerShell session, and it also works correctly for an advanced script that uses `CmdletBinding()` and `param()`.
 
@@ -164,19 +222,19 @@ You need **all** of the following before the proxy will work:
 |---|---|
 | Azure subscription access | Reader role or higher on the target subscription |
 | `Virtual Machine Administrator Login` or `Virtual Machine User Login` RBAC on the jumpbox | Must be assigned on the VM or an inherited scope such as the resource group; subscription Owner, Contributor, or Reader is not enough for OS login |
-| Azure CLI installed | Any recent version |
-| `bastion` and `ssh` CLI extensions | See install command below |
+| Azure CLI installed | Any recent version. The proxy scripts now try to install it automatically when the host OS has a supported package manager. |
+| `bastion` and `ssh` CLI extensions | The proxy scripts check and install these automatically in their dedicated CLI extension cache. |
 | Azure Bastion Standard or Premium | With **native client tunneling** enabled |
 
 If the Bastion tunnel starts and then OpenSSH returns `Permission denied (publickey).`, the Azure control-plane access is working and the VM login RBAC assignment is missing or has not propagated yet.
 
-Install the CLI extensions once:
+If you prefer to install the extensions yourself, run:
 
 ```bash
 az extension add --name bastion
 az extension add --name ssh
 ```
-
+For the one-time GitHub Actions OIDC bootstrap for this repository, see [initial-azure-setup.md](initial-azure-setup.md).
 ---
 
 ## How it works
@@ -237,8 +295,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-  start([Run proxy script]) --> prereq{Azure CLI + extensions installed?}
-  prereq -- no --> install[Install bastion and ssh extensions]
+  start([Run proxy script]) --> prereq{Azure CLI + extensions ready?}
+  prereq -- no --> install[Install Azure CLI and required extensions]
   prereq -- yes --> login{Already logged in?}
   install --> login
   login -- no --> browserLogin[Run az login<br/>browser opens for MFA]
@@ -279,13 +337,16 @@ Terraform under `infra/` deploys:
 
 > **Security highlight:** No SSH key pair is generated, stored, output, or used for normal access.
 
-### Default resource names
+### Example deployment values
 
-| Resource | Name |
+| Item | Example value |
 |---|---|
+| Subscription ID | `ffc5e617-7f2d-4ddb-8b57-33fc43989a8c` |
 | Resource group | `eo-dmi-alz-bastion-jumpbox-tools` |
 | Bastion host | `eo-dmi-alz-bastion-jumpbox-bastion` |
 | Jumpbox VM | `eo-dmi-alz-bastion-jumpbox-jumpbox` |
+| GitHub raw repo | `bcgov/eo-dmi-alz-bastion-jumpbox` |
+| Git ref | `main` |
 | Default SOCKS port | `8228` |
 
 ---
@@ -340,16 +401,16 @@ The same jumpbox path can expose private **TCP services** to local desktop tools
 
 ```powershell
 $vmId = az vm show `
-  --subscription    ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
-  --resource-group  eo-dmi-alz-bastion-jumpbox-tools `
-  --name            eo-dmi-alz-bastion-jumpbox-jumpbox `
+  --subscription    <subscription-id> `
+  --resource-group  <resource-group> `
+  --name            <vm-name> `
   --query id `
   --output tsv
 
 az network bastion ssh `
-  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
-  --name               eo-dmi-alz-bastion-jumpbox-bastion `
-  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
+  --subscription       <subscription-id> `
+  --name               <bastion-name> `
+  --resource-group     <resource-group> `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:15432:<postgres-private-hostname-or-ip>:5432 -N -o StrictHostKeyChecking=no
@@ -367,16 +428,16 @@ Once the tunnel is up, point your client at the local listener:
 
 ```powershell
 $vmId = az vm show `
-  --subscription    ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
-  --resource-group  eo-dmi-alz-bastion-jumpbox-tools `
-  --name            eo-dmi-alz-bastion-jumpbox-jumpbox `
+  --subscription    <subscription-id> `
+  --resource-group  <resource-group> `
+  --name            <vm-name> `
   --query id `
   --output tsv
 
 az network bastion ssh `
-  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
-  --name               eo-dmi-alz-bastion-jumpbox-bastion `
-  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
+  --subscription       <subscription-id> `
+  --name               <bastion-name> `
+  --resource-group     <resource-group> `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:16379:<redis-private-hostname-or-ip>:6380 -N -o StrictHostKeyChecking=no
@@ -454,12 +515,14 @@ Use the `MicrosoftAzureBastionAuditLogs` table in the Log Analytics workspace. T
 
 > Log ingestion is not instant. Expect a short Azure Monitor delay before a just-started or just-ended session appears in KQL.
 
+Set `BastionName` to your Bastion resource name. For this repo deployment, use `eo-dmi-alz-bastion-jumpbox-bastion`.
+
 ### Query: who is connected right now
 
 This query shows sessions whose `SessionEndTime` is still empty and calculates the elapsed time since `SessionStartTime`.
 
 ```kql
-let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
+let BastionName = "<bastion-name>";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(1d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -484,7 +547,7 @@ MicrosoftAzureBastionAuditLogs
 This query shows completed Bastion sessions and uses the logged `Duration` value, which Azure writes in milliseconds once the session ends.
 
 ```kql
-let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
+let BastionName = "<bastion-name>";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(7d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -510,7 +573,7 @@ MicrosoftAzureBastionAuditLogs
 Use this to summarize Bastion usage by user over a reporting window.
 
 ```kql
-let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
+let BastionName = "<bastion-name>";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(30d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -549,6 +612,8 @@ flowchart LR
 
 The workflow at `.github/workflows/deploy-terraform.yml` deploys infrastructure non-interactively via GitHub Actions OIDC — separate from developer browser access.
 
+Use [initial-azure-setup.md](initial-azure-setup.md) for the one-time bootstrap that creates the managed identity, federated credential, optional Terraform state storage, and optional GitHub environment secrets for this repo.
+
 **Deployment notes**
 
 - Terraform backend settings come from workflow secrets and variables.
@@ -584,30 +649,30 @@ az account show --query "{name:name, tenantId:tenantId, user:user.name}" --outpu
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+  -ResourceGroup <resource-group> `
+  -BastionName   <bastion-name> `
+  -VmName        <vm-name>
 ```
 
 **Run the proxy from the repo root with Bash**
 
 ```bash
 bash ./infra/scripts/bastion-proxy.sh \
-  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
-  --bastion-name   eo-dmi-alz-bastion-jumpbox-bastion \
-  --vm-name        eo-dmi-alz-bastion-jumpbox-jumpbox
+  --resource-group <resource-group> \
+  --bastion-name   <bastion-name> \
+  --vm-name        <vm-name>
 ```
 
 **Run the proxy directly from GitHub without cloning the repo**
 
 ```powershell
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) 'bastion-proxy.ps1'
-Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/bcgov/eo-dmi-alz-bastion-jumpbox/main/infra/scripts/bastion-proxy.ps1' -OutFile $tmp
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/<repo-owner>/<repo-name>/<ref>/infra/scripts/bastion-proxy.ps1' -OutFile $tmp
 try {
   pwsh -ExecutionPolicy Bypass -File $tmp `
-    -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
-    -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
-    -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+    -ResourceGroup <resource-group> `
+    -BastionName   <bastion-name> `
+    -VmName        <vm-name>
 }
 finally {
   Remove-Item $tmp -Force -ErrorAction SilentlyContinue
@@ -615,27 +680,27 @@ finally {
 ```
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/bcgov/eo-dmi-alz-bastion-jumpbox/main/infra/scripts/bastion-proxy.sh \
+curl -fsSL https://raw.githubusercontent.com/<repo-owner>/<repo-name>/<ref>/infra/scripts/bastion-proxy.sh \
   | bash -s -- \
-    --resource-group eo-dmi-alz-bastion-jumpbox-tools \
-    --bastion-name eo-dmi-alz-bastion-jumpbox-bastion \
-    --vm-name eo-dmi-alz-bastion-jumpbox-jumpbox
+    --resource-group <resource-group> \
+    --bastion-name <bastion-name> \
+    --vm-name <vm-name>
 ```
 
 **Start the VM manually**
 
 ```bash
 az vm start \
-  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
-  --name           eo-dmi-alz-bastion-jumpbox-jumpbox
+  --resource-group <resource-group> \
+  --name           <vm-name>
 ```
 
 **Stop and deallocate the VM manually**
 
 ```bash
 az vm deallocate \
-  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
-  --name           eo-dmi-alz-bastion-jumpbox-jumpbox
+  --resource-group <resource-group> \
+  --name           <vm-name>
 ```
 
 **Validate Terraform locally**
