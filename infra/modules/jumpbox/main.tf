@@ -103,7 +103,7 @@ resource "azurerm_linux_virtual_machine" "jumpbox" {
   lifecycle {
     ignore_changes = [
       tags,
-      identity
+      admin_ssh_key
     ]
   }
 }
@@ -141,14 +141,37 @@ resource "azurerm_automation_account" "jumpbox" {
   }
 }
 
+resource "azapi_resource" "python310" {
+  type      = "Microsoft.Automation/automationAccounts/runtimeEnvironments@2024-10-23"
+  parent_id = azurerm_automation_account.jumpbox.id
+  name      = "python310-runtime"
+  location  = var.location
+
+  body = {
+    properties = {
+      description = "Python 3.10 runtime for runbooks"
+      runtime = {
+        language = "Python"
+        version  = "3.10"
+      }
+    }
+  }
+
+  tags = var.common_tags
+  lifecycle {
+    ignore_changes = [tags]
+  }
+}
+
 resource "azurerm_automation_runbook" "start_vm" {
-  name                    = "Start-JumpboxVM"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = true
-  log_progress            = true
-  runbook_type            = "Python3"
+  name                     = "Start-JumpboxVM"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = true
+  log_progress             = true
+  runbook_type             = "Python"
+  runtime_environment_name = azapi_resource.python310.name
 
   content = templatefile("${path.module}/scripts/start_vm.py", {
     subscription_id     = data.azurerm_subscription.current.subscription_id
@@ -156,21 +179,26 @@ resource "azurerm_automation_runbook" "start_vm" {
     app_name            = var.app_name
   })
 
+  job_schedule {
+    schedule_name = azurerm_automation_schedule.weekday_start.name
+  }
+
   tags = var.common_tags
   lifecycle {
-    ignore_changes = [tags, runbook_type]
+    ignore_changes = [tags]
   }
 }
 
 resource "azurerm_automation_runbook" "create_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Create-BastionHost"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = true
-  log_progress            = true
-  runbook_type            = "Python3"
+  count                    = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
+  name                     = "Create-BastionHost"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = true
+  log_progress             = true
+  runbook_type             = "Python"
+  runtime_environment_name = azapi_resource.python310.name
 
 
   content = templatefile("${path.module}/scripts/create_bastion.py", {
@@ -195,6 +223,10 @@ resource "azurerm_automation_runbook" "create_bastion" {
     common_tags_json                          = jsonencode(var.common_tags)
   })
 
+  job_schedule {
+    schedule_name = azurerm_automation_schedule.weekday_create_bastion[0].name
+  }
+
   tags = var.common_tags
   lifecycle {
     ignore_changes = [tags, runbook_type]
@@ -202,20 +234,25 @@ resource "azurerm_automation_runbook" "create_bastion" {
 }
 
 resource "azurerm_automation_runbook" "delete_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  name                    = "Delete-BastionHost"
-  location                = var.location
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  log_verbose             = true
-  log_progress            = true
-  runbook_type            = "Python3"
+  count                    = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
+  name                     = "Delete-BastionHost"
+  location                 = var.location
+  resource_group_name      = var.resource_group_name
+  automation_account_name  = azurerm_automation_account.jumpbox.name
+  log_verbose              = true
+  log_progress             = true
+  runbook_type             = "Python"
+  runtime_environment_name = azapi_resource.python310.name
 
   content = templatefile("${path.module}/scripts/delete_bastion.py", {
     subscription_id     = data.azurerm_subscription.current.subscription_id
     resource_group_name = var.resource_group_name
     app_name            = var.app_name
   })
+
+  job_schedule {
+    schedule_name = azurerm_automation_schedule.daily_delete_bastion[0].name
+  }
 
   tags = var.common_tags
   lifecycle {
@@ -244,13 +281,6 @@ resource "azurerm_automation_schedule" "weekday_start" {
   }
 }
 
-resource "azurerm_automation_job_schedule" "start_vm" {
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  schedule_name           = azurerm_automation_schedule.weekday_start.name
-  runbook_name            = azurerm_automation_runbook.start_vm.name
-}
-
 resource "azurerm_automation_schedule" "weekday_create_bastion" {
   count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
   name                    = "Weekday-1500UTC-Create-Bastion"
@@ -265,14 +295,6 @@ resource "azurerm_automation_schedule" "weekday_create_bastion" {
   lifecycle {
     ignore_changes = [start_time]
   }
-}
-
-resource "azurerm_automation_job_schedule" "create_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  schedule_name           = azurerm_automation_schedule.weekday_create_bastion[0].name
-  runbook_name            = azurerm_automation_runbook.create_bastion[0].name
 }
 
 resource "azurerm_automation_schedule" "daily_delete_bastion" {
@@ -290,33 +312,11 @@ resource "azurerm_automation_schedule" "daily_delete_bastion" {
   }
 }
 
-resource "azurerm_automation_job_schedule" "delete_bastion" {
-  count                   = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  resource_group_name     = var.resource_group_name
-  automation_account_name = azurerm_automation_account.jumpbox.name
-  schedule_name           = azurerm_automation_schedule.daily_delete_bastion[0].name
-  runbook_name            = azurerm_automation_runbook.delete_bastion[0].name
-}
-
 resource "azurerm_role_assignment" "automation_network_contributor" {
   count                = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
   scope                = "/subscriptions/${data.azurerm_subscription.current.subscription_id}/resourceGroups/${var.resource_group_name}"
   role_definition_name = "Network Contributor"
   principal_id         = azurerm_automation_account.jumpbox.identity[0].principal_id
-}
-
-resource "azurerm_role_assignment" "automation_bastion_subnet_network_contributor" {
-  count                = var.enable_bastion && var.enable_bastion_automation ? 1 : 0
-  scope                = var.bastion_subnet_id
-  role_definition_name = "Network Contributor"
-  principal_id         = azurerm_automation_account.jumpbox.identity[0].principal_id
-
-  lifecycle {
-    precondition {
-      condition     = var.bastion_subnet_id != null
-      error_message = "bastion_subnet_id must be provided when bastion automation is enabled."
-    }
-  }
 }
 
 resource "azurerm_role_assignment" "automation_vm_contributor" {
