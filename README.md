@@ -1,6 +1,6 @@
 # EO DMI ALZ Bastion Jumpbox
 
-> **Private Azure access for developers — no VPN, no public IPs, no SSH keys.**
+> **Private Azure access for developers following Azure landing zone policy — no VPN, no public IPs, no SSH keys.**
 
 A small **Azure Bastion + Linux jumpbox** access path so developers can reach private Azure
 endpoints from their workstation. Works for **browsers** (SOCKS5 dynamic proxy) and **native
@@ -8,7 +8,8 @@ TCP clients** like `psql`, DBeaver, or `redis-cli` (local port forward). Authent
 **Microsoft Entra ID + MFA** only.
 
 The jumpbox is configured with **Automatic VM Guest Patching** and **Azure Update Manager
-periodic assessment** so update compliance is visible in line with ALZ guardrail expectations.
+periodic assessment** so update compliance is visible and ✅ aligned with the
+[BC Gov Azure Bastion guidance](https://developer.gov.bc.ca/docs/default/component/public-cloud-techdocs/azure/tools/bastion/).
 
 ---
 
