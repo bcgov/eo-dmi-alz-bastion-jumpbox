@@ -32,21 +32,74 @@ extract_import_target() {
         return 1
     fi
 
+    # Terraform error output often includes box-drawing characters such as
+    # "│", "╷", and "╵". Strip non-ASCII bytes and CR characters first so the
+    # matching logic only sees the stable textual content.
+    local normalized_content
+    normalized_content="$({
+        printf '%s' "$content" |
+            tr -d '\r' |
+            LC_ALL=C tr -cd '\11\12\40-\176'
+    })"
+
     # Check if this is an "already exists" error
-    if ! echo "$content" | grep -q "already exists"; then
+    if ! grep -q "already exists" <<<"$normalized_content"; then
         return 1
     fi
 
     # Extract the Terraform resource address from "with <address>," line
     # Example: │   with module.frontend[0].azurerm_linux_web_app.frontend,
     local resource_addr
-    resource_addr=$(echo "$content" | grep -oE 'with [^,]+,' | head -1 | sed 's/^with //; s/,$//')
+    resource_addr="$({
+        grep -m1 -oE 'with [^,]+,' <<<"$normalized_content" |
+            sed 's/^with //; s/,$//'
+    } || true)"
 
-    # Extract the Azure resource ID from lines containing BOTH the ID and "already exists"
-    # The format is: Error: a resource with the ID "/subscriptions/..." already exists
-    # We need the ID from THAT specific line, not just any /subscriptions/ ID in the file
+    # Extract the Azure resource ID from the importable "already exists" error,
+    # supporting both the single-line and multiline Terraform output variants.
     local resource_id
-    resource_id=$(echo "$content" | grep "already exists" | grep -oE '"/subscriptions/[^"]+"|^/subscriptions/[^"[:space:]]+' | head -1 | tr -d '"')
+    resource_id="$(awk '
+        BEGIN {
+            awaiting_id = 0
+            pending_id = ""
+        }
+
+        {
+            if ($0 ~ /a resource with the ID/) {
+                awaiting_id = 1
+                if (match($0, /\/subscriptions\/[^"[:space:]]+/)) {
+                    pending_id = substr($0, RSTART, RLENGTH)
+                    awaiting_id = 0
+                } else {
+                    pending_id = ""
+                }
+
+                if ($0 ~ /already exists/ && pending_id != "") {
+                    print pending_id
+                    exit 0
+                }
+                next
+            }
+
+            if (awaiting_id || pending_id != "") {
+                if (pending_id == "" && match($0, /\/subscriptions\/[^"[:space:]]+/)) {
+                    pending_id = substr($0, RSTART, RLENGTH)
+                    awaiting_id = 0
+                }
+
+                if ($0 ~ /already exists/ && pending_id != "") {
+                    print pending_id
+                    exit 0
+                }
+                next
+            }
+
+            if ($0 ~ /already exists/ && match($0, /\/subscriptions\/[^"[:space:]]+/)) {
+                print substr($0, RSTART, RLENGTH)
+                exit 0
+            }
+        }
+    ' <<<"$normalized_content")"
 
     if [[ -n "$resource_addr" && -n "$resource_id" ]]; then
         printf '%s\t%s\n' "$resource_addr" "$resource_id"

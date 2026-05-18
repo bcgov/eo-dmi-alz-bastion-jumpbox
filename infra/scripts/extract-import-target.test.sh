@@ -352,6 +352,21 @@ run_test "Resource name with hyphens and numbers" \
     "module.frontend[0].azurerm_linux_web_app.frontend" \
     "/subscriptions/sub/resourceGroups/my-rg-123/providers/Microsoft.Web/sites/my-app-prod-v2-001"
 
+# Test 26: Diagnostic setting import ID with pipe delimiter
+run_test "Diagnostic setting composite ID" \
+'module.jumpbox[0].azurerm_automation_runbook.start_vm: Modifications complete after 14s [id=/subscriptions/123/resourceGroups/rg/providers/Microsoft.Automation/automationAccounts/aa/runbooks/Start-JumpboxVM]
+╷
+│ Error: a resource with the ID "/subscriptions/123/resourceGroups/rg/providers/Microsoft.Network/bastionHosts/my-bastion|my-bastion-audit" already exists - to be managed via Terraform this resource needs to be imported into the State. Please see the resource documentation for "azurerm_monitor_diagnostic_setting" for more information
+│ 
+│   with module.bastion[0].azurerm_monitor_diagnostic_setting.bastion_audit,
+│   on modules/bastion/main.tf line 51, in resource "azurerm_monitor_diagnostic_setting" "bastion_audit":
+│   51: resource "azurerm_monitor_diagnostic_setting" "bastion_audit" {
+│ 
+╵' \
+    0 \
+    "module.bastion[0].azurerm_monitor_diagnostic_setting.bastion_audit" \
+    "/subscriptions/123/resourceGroups/rg/providers/Microsoft.Network/bastionHosts/my-bastion|my-bastion-audit"
+
 # =============================================================================
 # SUMMARY
 # =============================================================================
