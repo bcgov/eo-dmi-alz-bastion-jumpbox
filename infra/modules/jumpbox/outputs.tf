@@ -4,17 +4,17 @@
 
 output "vm_id" {
   description = "ID of the jumpbox virtual machine"
-  value       = azurerm_linux_virtual_machine.jumpbox.id
+  value       = module.jumpbox.resource_id
 }
 
 output "vm_name" {
   description = "Name of the jumpbox virtual machine"
-  value       = azurerm_linux_virtual_machine.jumpbox.name
+  value       = module.jumpbox.name
 }
 
 output "private_ip_address" {
   description = "Private IP address of the jumpbox VM"
-  value       = azurerm_network_interface.jumpbox.private_ip_address
+  value       = module.jumpbox.virtual_machine_azurerm.private_ip_address
 }
 
 output "admin_username" {
@@ -24,7 +24,7 @@ output "admin_username" {
 
 output "principal_id" {
   description = "Principal ID of the VM's managed identity"
-  value       = azurerm_linux_virtual_machine.jumpbox.identity[0].principal_id
+  value       = module.jumpbox.system_assigned_mi_principal_id
 }
 
 output "auto_shutdown_time" {
