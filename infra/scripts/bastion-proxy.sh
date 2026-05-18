@@ -14,9 +14,9 @@
 # usage examples.
 #
 # PREREQUISITES
-#   Azure CLI:         https://learn.microsoft.com/cli/azure/install-azure-cli
-#   bastion extension: az extension add --name bastion
-#   ssh extension:     az extension add --name ssh   (AAD auth only)
+#   Azure CLI:         installed automatically if missing when supported by the host OS
+#   bastion extension: installed automatically if missing
+#   ssh extension:     installed automatically if missing (AAD auth only)
 #   Standard SKU Azure Bastion with native tunnelling enabled
 #   The signing-in Entra user, or a group they belong to, must have
 #   a manual "Virtual Machine Administrator Login" assignment on the
@@ -34,16 +34,19 @@
 #   -g, --resource-group    Resource group containing Bastion and VM   [required]
 #   -b, --bastion-name      Name of the Azure Bastion host             [required]
 #   -v, --vm-name           Name of the jumpbox VM                     [required]
-#   -s, --subscription      Azure subscription ID to use               [default: ffc5e617-7f2d-4ddb-8b57-33fc43989a8c]
+#   -s, --subscription      Azure subscription ID to use               [default: built-in repo default]
 #   -p, --port              Starting SOCKS5 port (default: 8228)       [optional]
 #   -h, --help              Show this help and exit
 #
 # EXAMPLES
 #   # Entra ID (AAD) auth:
-#   ./scripts/bastion-proxy.sh -g eo-dmi-alz-bastion-jumpbox-tools -b eo-dmi-alz-bastion-jumpbox-bastion -v eo-dmi-alz-bastion-jumpbox-jumpbox
+#   ./scripts/bastion-proxy.sh -g <resource-group> -b <bastion-name> -v <vm-name>
 #
 #   # Override the active Azure subscription if needed:
-#   ./scripts/bastion-proxy.sh -g eo-dmi-alz-bastion-jumpbox-tools -b eo-dmi-alz-bastion-jumpbox-bastion -v eo-dmi-alz-bastion-jumpbox-jumpbox -s <subscription-id>
+#   ./scripts/bastion-proxy.sh -g <resource-group> -b <bastion-name> -v <vm-name> -s <subscription-id>
+#
+#   # Example for this repo deployment:
+#   ./scripts/bastion-proxy.sh -g eo-dmi-alz-bastion-jumpbox-tools -b eo-dmi-alz-bastion-jumpbox-bastion -v eo-dmi-alz-bastion-jumpbox-jumpbox
 #
 #   # Derive names from Terraform outputs (run from initial-setup/infra/):
 #   ./scripts/bastion-proxy.sh \
@@ -76,6 +79,267 @@ info() { echo -e "${CYAN}[INFO]${RESET}  $*"; }
 ok()   { echo -e "${GREEN}[ OK ]${RESET}  $*"; }
 warn() { echo -e "${YELLOW}[WARN]${RESET}  $*"; }
 trim_cr() { tr -d '\r'; }
+command_exists() { command -v "$1" &>/dev/null; }
+
+detect_os() {
+  case "$(uname -s 2>/dev/null || echo unknown)" in
+    Linux) echo "linux" ;;
+    Darwin) echo "macos" ;;
+    MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+    *) echo "unknown" ;;
+  esac
+}
+
+windows_path_to_unix() {
+  local input=$1
+
+  if command_exists cygpath; then
+    cygpath -u "$input"
+    return 0
+  fi
+
+  if [[ "$input" =~ ^([A-Za-z]):[\\/](.*)$ ]]; then
+    local drive
+    local rest
+    drive=$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    rest=${BASH_REMATCH[2]//\\//}
+    printf '/%s/%s\n' "$drive" "$rest"
+    return 0
+  fi
+
+  printf '%s\n' "$input"
+}
+
+unix_path_to_windows() {
+  local input=$1
+
+  if command_exists cygpath; then
+    cygpath -w "$input"
+    return 0
+  fi
+
+  if [[ "$input" =~ ^/([A-Za-z])/(.*)$ ]]; then
+    local drive
+    local rest
+    drive=$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+    rest=${BASH_REMATCH[2]//\//\\}
+    printf '%s:\\%s\n' "$drive" "$rest"
+    return 0
+  fi
+
+  printf '%s\n' "$input"
+}
+
+run_with_privilege() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    "$@"
+  elif command_exists sudo; then
+    sudo "$@"
+  else
+    err "This Azure CLI install path requires sudo."
+    return 1
+  fi
+}
+
+install_azure_cli_windows() {
+  local winget_cmd=""
+  local choco_cmd=""
+
+  winget_cmd=$(command -v winget.exe 2>/dev/null || command -v winget 2>/dev/null || true)
+  choco_cmd=$(command -v choco.exe 2>/dev/null || command -v choco 2>/dev/null || true)
+
+  if [[ -n "$winget_cmd" ]]; then
+    info "Installing Azure CLI with WinGet..."
+    "$winget_cmd" install --exact --id Microsoft.AzureCLI --accept-source-agreements --accept-package-agreements || warn "WinGet returned a non-zero exit code while installing Azure CLI."
+    return 0
+  fi
+
+  if [[ -n "$choco_cmd" ]]; then
+    info "Installing Azure CLI with Chocolatey..."
+    "$choco_cmd" install azure-cli -y || warn "Chocolatey returned a non-zero exit code while installing Azure CLI."
+    return 0
+  fi
+
+  if command_exists powershell.exe; then
+    info "Installing Azure CLI with the Microsoft MSI installer..."
+    powershell.exe -NoProfile -Command '& {
+      $ProgressPreference = "SilentlyContinue"
+      $installer = Join-Path $env:TEMP "AzureCLI.msi"
+      Invoke-WebRequest -UseBasicParsing -Uri "https://aka.ms/installazurecliwindows" -OutFile $installer
+      try {
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", $installer, "/passive", "/norestart") -Wait -PassThru
+        if ($process.ExitCode -notin @(0, 3010)) {
+          exit $process.ExitCode
+        }
+      }
+      finally {
+        Remove-Item -Path $installer -Force -ErrorAction SilentlyContinue
+      }
+    }' || warn "The MSI installer returned a non-zero exit code while installing Azure CLI."
+    return 0
+  fi
+
+  err "Azure CLI could not be installed automatically on Windows. Install it from https://learn.microsoft.com/cli/azure/install-azure-cli"
+  return 1
+}
+
+install_azure_cli_linux() {
+  if command_exists apt-get; then
+    info "Installing Azure CLI for Debian/Ubuntu..."
+    if ! command_exists curl; then
+      err "curl is required to install Azure CLI on Debian/Ubuntu."
+      return 1
+    fi
+
+    if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+    elif command_exists sudo; then
+      curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+    else
+      err "Installing Azure CLI on Debian/Ubuntu requires sudo."
+      return 1
+    fi
+    return 0
+  fi
+
+  if command_exists dnf || command_exists yum; then
+    local repo_file=""
+    repo_file=$(mktemp)
+    cat > "$repo_file" <<'EOF'
+[azure-cli]
+name=Azure CLI
+baseurl=https://packages.microsoft.com/yumrepos/azure-cli
+enabled=1
+gpgcheck=1
+gpgkey=https://packages.microsoft.com/keys/microsoft.asc
+EOF
+
+    info "Installing Azure CLI for RHEL/Fedora..."
+    run_with_privilege rpm --import https://packages.microsoft.com/keys/microsoft.asc
+    run_with_privilege mv "$repo_file" /etc/yum.repos.d/azure-cli.repo
+    if command_exists dnf; then
+      run_with_privilege dnf install -y azure-cli
+    else
+      run_with_privilege yum install -y azure-cli
+    fi
+    return 0
+  fi
+
+  err "Automatic Azure CLI install is not implemented for this Linux distribution. Install it from https://learn.microsoft.com/cli/azure/install-azure-cli"
+  return 1
+}
+
+install_azure_cli() {
+  case "$(detect_os)" in
+    windows)
+      install_azure_cli_windows
+      ;;
+    macos)
+      if command_exists brew; then
+        info "Installing Azure CLI with Homebrew..."
+        brew install azure-cli
+      else
+        err "Homebrew is required for automatic Azure CLI install on macOS. Install Azure CLI from https://learn.microsoft.com/cli/azure/install-azure-cli"
+        return 1
+      fi
+      ;;
+    linux)
+      install_azure_cli_linux
+      ;;
+    *)
+      err "Automatic Azure CLI install is not supported on this operating system."
+      return 1
+      ;;
+  esac
+}
+
+find_az_command() {
+  local resolved=""
+
+  resolved=$(type -P az 2>/dev/null || true)
+  if [[ -n "$resolved" ]]; then
+    echo "$resolved"
+    return 0
+  fi
+
+  if [[ "$(detect_os)" == "windows" ]] && command_exists powershell.exe; then
+    resolved=$(powershell.exe -NoProfile -Command '& {
+      $azCommand = Get-Command az -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($azCommand) {
+        foreach ($propertyName in @("Path", "Source", "Definition")) {
+          $propertyValue = $azCommand.$propertyName
+          if ($propertyValue) {
+            Write-Output $propertyValue
+            exit 0
+          }
+        }
+      }
+      $candidatePaths = @(
+        (Join-Path $env:LocalAppData "Microsoft\WinGet\Links\az.cmd"),
+        (Join-Path $env:LocalAppData "Microsoft\WinGet\Links\az.exe"),
+        (Join-Path $env:ProgramFiles "Microsoft SDKs\Azure\CLI2\wbin\az.cmd"),
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft SDKs\Azure\CLI2\wbin\az.cmd"),
+        (Join-Path $env:ProgramFiles "Microsoft SDKs\Azure\CLI2\wbin\az.ps1"),
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft SDKs\Azure\CLI2\wbin\az.ps1")
+      ) | Where-Object { $_ }
+      foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path $candidatePath) {
+          Write-Output $candidatePath
+          exit 0
+        }
+      }
+      exit 1
+    }' 2>/dev/null | trim_cr)
+    if [[ -n "$resolved" ]]; then
+      echo "$(windows_path_to_unix "$resolved")"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+ensure_azure_extension_dir() {
+  local extension_dir_input="${AZURE_EXTENSION_DIR:-${HOME}/.azure/cliextensions-bastion-proxy}"
+  local extension_dir_fs="$extension_dir_input"
+  local extension_dir_cli="$extension_dir_input"
+
+  if [[ "$(detect_os)" == "windows" ]]; then
+    if [[ "$extension_dir_input" =~ ^[A-Za-z]:[\\/].*$ ]]; then
+      extension_dir_fs=$(windows_path_to_unix "$extension_dir_input")
+    fi
+    extension_dir_cli=$(unix_path_to_windows "$extension_dir_fs")
+  fi
+
+  mkdir -p "$extension_dir_fs"
+  export AZURE_EXTENSION_DIR="$extension_dir_cli"
+  info "Using dedicated Azure CLI extension cache: ${AZURE_EXTENSION_DIR}"
+}
+
+install_az_extension_if_missing() {
+  local extension_name=$1
+  local installed_name=""
+
+  installed_name=$(az extension list --only-show-errors --query "[?name=='${extension_name}'].name | [0]" --output tsv 2>/dev/null | trim_cr || true)
+  if [[ "$installed_name" == "$extension_name" ]]; then
+    return 0
+  fi
+
+  info "Installing Azure CLI '${extension_name}' extension..."
+  az extension add --name "$extension_name" --yes --only-show-errors
+
+  installed_name=$(az extension list --only-show-errors --query "[?name=='${extension_name}'].name | [0]" --output tsv 2>/dev/null | trim_cr || true)
+  if [[ "$installed_name" != "$extension_name" ]]; then
+    err "Azure CLI '${extension_name}' extension could not be installed."
+    exit 1
+  fi
+}
+
+AZ_COMMAND=""
+
+az() {
+  "$AZ_COMMAND" "$@"
+}
 
 launch_proxy_browser() {
   local port=$1
@@ -235,29 +499,23 @@ done
 # ── Prerequisite checks ───────────────────────────────────────────────────────
 
 info "Checking prerequisites..."
+AZ_COMMAND=$(find_az_command || true)
+if [[ -z "$AZ_COMMAND" ]]; then
+  warn "Azure CLI (az) is not installed. Attempting installation..."
+  install_azure_cli || exit 1
+  AZ_COMMAND=$(find_az_command || true)
+fi
 
-command -v az &>/dev/null || {
-  err "Azure CLI (az) is not installed."
-  err "Install: https://learn.microsoft.com/cli/azure/install-azure-cli"
+if [[ -z "$AZ_COMMAND" ]]; then
+  err "Azure CLI could not be resolved after installation. Re-run the script in a fresh shell or install it manually from https://learn.microsoft.com/cli/azure/install-azure-cli"
   exit 1
-}
-
-if [[ -z "${AZURE_EXTENSION_DIR:-}" ]]; then
-  AZURE_EXTENSION_DIR="${HOME}/.azure/cliextensions-bastion-proxy"
-  export AZURE_EXTENSION_DIR
-  info "Using dedicated Azure CLI extension cache: ${AZURE_EXTENSION_DIR}"
-fi
-mkdir -p "$AZURE_EXTENSION_DIR"
-
-if ! az extension show --name bastion &>/dev/null 2>&1; then
-  info "Installing Azure CLI 'bastion' extension..."
-  az extension add --name bastion --yes
 fi
 
-if ! az extension show --name ssh &>/dev/null 2>&1; then
-  info "Installing Azure CLI 'ssh' extension..."
-  az extension add --name ssh --yes
-fi
+info "Azure CLI ready: ${AZ_COMMAND}"
+
+ensure_azure_extension_dir
+install_az_extension_if_missing bastion
+install_az_extension_if_missing ssh
 
 ok "Prerequisites satisfied"
 

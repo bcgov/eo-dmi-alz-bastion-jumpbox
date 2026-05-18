@@ -9,9 +9,9 @@
 # without a VPN.
 #
 # PREREQUISITES
-#   Azure CLI:         https://learn.microsoft.com/cli/azure/install-azure-cli
-#   bastion extension: az extension add --name bastion
-#   ssh extension:     az extension add --name ssh   (AAD auth only)
+#   Azure CLI:         installed automatically if missing when run on Windows
+#   bastion extension: installed automatically if missing
+#   ssh extension:     installed automatically if missing (AAD auth only)
 #   Standard SKU Azure Bastion with native tunnelling enabled
 #   The signing-in Entra user, or a group they belong to, must have
 #   a manual "Virtual Machine Administrator Login" assignment on the
@@ -27,13 +27,13 @@
 #
 # EXAMPLES
 #   # Entra ID (AAD) auth:
-#   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools -BastionName eo-dmi-alz-bastion-jumpbox-bastion -VmName eo-dmi-alz-bastion-jumpbox-jumpbox
+#   .\scripts\bastion-proxy.ps1 -ResourceGroup <resource-group> -BastionName <bastion-name> -VmName <vm-name>
 #
 #   # Override the active Azure subscription if needed:
-#   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools -BastionName eo-dmi-alz-bastion-jumpbox-bastion -VmName eo-dmi-alz-bastion-jumpbox-jumpbox -SubscriptionId <subscription-id>
+#   .\scripts\bastion-proxy.ps1 -ResourceGroup <resource-group> -BastionName <bastion-name> -VmName <vm-name> -SubscriptionId <subscription-id>
 #
-#   # Default subscription if omitted:
-#   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c
+#   # Example for this repo deployment:
+#   .\scripts\bastion-proxy.ps1 -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools -BastionName eo-dmi-alz-bastion-jumpbox-bastion -VmName eo-dmi-alz-bastion-jumpbox-jumpbox
 #
 # =============================================================================
 
@@ -60,6 +60,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$script:AzCommandPath = $null
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -110,6 +111,119 @@ function Get-AzProbeText {
         Output   = $text.Trim()
         ExitCode = $result.ExitCode
     }
+}
+
+function Get-ExecutableCommandPath {
+    param(
+        [Parameter(Mandatory)]
+        $CommandInfo
+    )
+
+    foreach ($propertyName in 'Path', 'Source', 'Definition') {
+        $propertyValue = $CommandInfo.$propertyName
+        if (-not [string]::IsNullOrWhiteSpace($propertyValue)) {
+            return $propertyValue
+        }
+    }
+
+    return $null
+}
+
+function Find-AzCommandPath {
+    $azCommand = Get-Command az -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($azCommand) {
+        return (Get-ExecutableCommandPath -CommandInfo $azCommand)
+    }
+
+    $candidatePaths = @(
+        (Join-Path $env:LocalAppData 'Microsoft\WinGet\Links\az.cmd'),
+        (Join-Path $env:LocalAppData 'Microsoft\WinGet\Links\az.exe'),
+        (Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin\az.cmd'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft SDKs\Azure\CLI2\wbin\az.cmd'),
+        (Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin\az.ps1'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Microsoft SDKs\Azure\CLI2\wbin\az.ps1')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    foreach ($candidatePath in $candidatePaths) {
+        if (Test-Path $candidatePath) {
+            return $candidatePath
+        }
+    }
+
+    return $null
+}
+
+function Update-ProcessPathFromEnvironment {
+    $pathParts = @(
+        ($env:Path -split ';'),
+        ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';'),
+        ([Environment]::GetEnvironmentVariable('Path', 'Machine') -split ';')
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $env:Path = $pathParts -join ';'
+}
+
+function Install-AzureCliIfMissing {
+    $script:AzCommandPath = Find-AzCommandPath
+    if ($script:AzCommandPath) {
+        Write-Ok "Azure CLI ready: $script:AzCommandPath"
+        return
+    }
+
+    Write-Warn 'Azure CLI (az) is not installed. Attempting installation...'
+
+    $wingetCommand = Get-Command winget.exe, winget -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+    $chocoCommand = Get-Command choco.exe, choco -CommandType Application, ExternalScript -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if ($wingetCommand) {
+        $wingetPath = Get-ExecutableCommandPath -CommandInfo $wingetCommand
+        Write-Info 'Installing Azure CLI with WinGet...'
+        & $wingetPath install --exact --id Microsoft.AzureCLI --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "WinGet returned exit code $LASTEXITCODE while installing Azure CLI."
+        }
+    }
+    elseif ($chocoCommand) {
+        $chocoPath = Get-ExecutableCommandPath -CommandInfo $chocoCommand
+        Write-Info 'Installing Azure CLI with Chocolatey...'
+        & $chocoPath install azure-cli -y 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Chocolatey returned exit code $LASTEXITCODE while installing Azure CLI."
+        }
+    }
+    else {
+        $installerPath = Join-Path $env:TEMP 'AzureCLI.msi'
+        Write-Info 'Installing Azure CLI with the Microsoft MSI installer...'
+        try {
+            Invoke-WebRequest -Uri 'https://aka.ms/installazurecliwindows' -OutFile $installerPath
+            $installerProcess = Start-Process -FilePath 'msiexec.exe' -ArgumentList @('/i', $installerPath, '/passive', '/norestart') -Wait -PassThru
+            if ($installerProcess.ExitCode -notin @(0, 3010)) {
+                Write-Warn "Azure CLI MSI installer returned exit code $($installerProcess.ExitCode)."
+            }
+        }
+        finally {
+            Remove-Item -Path $installerPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    Update-ProcessPathFromEnvironment
+    $script:AzCommandPath = Find-AzCommandPath
+    if (-not $script:AzCommandPath) {
+        Write-Err 'Azure CLI could not be resolved after installation. Re-run the script in a fresh shell or install it manually from https://learn.microsoft.com/cli/azure/install-azure-cli'
+        exit 1
+    }
+
+    Write-Ok "Azure CLI ready: $script:AzCommandPath"
+}
+
+function az {
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [object[]]$Arguments
+    )
+
+    & $script:AzCommandPath @Arguments
 }
 
 function Install-AzExtensionIfMissing {
@@ -254,12 +368,7 @@ function Write-CommandLogTail {
 # ── Prerequisite checks ───────────────────────────────────────────────────────
 
 Write-Info 'Checking prerequisites...'
-
-if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-    Write-Err 'Azure CLI (az) is not installed.'
-    Write-Err 'Install: https://learn.microsoft.com/cli/azure/install-azure-cli'
-    exit 1
-}
+Install-AzureCliIfMissing
 
 if (-not $env:AZURE_EXTENSION_DIR) {
     $env:AZURE_EXTENSION_DIR = Join-Path $HOME '.azure\cliextensions-bastion-proxy'
