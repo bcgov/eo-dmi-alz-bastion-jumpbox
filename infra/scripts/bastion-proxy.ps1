@@ -247,7 +247,7 @@ function Write-CommandLogTail {
         return
     }
 
-    Write-Warn "Recent Azure Bastion SSH output from $LogPath:"
+    Write-Warn "Recent Azure Bastion SSH output from ${LogPath}:"
     Get-Content -Path $LogPath -Tail $TailLines | ForEach-Object { Write-Host $_ }
 }
 
