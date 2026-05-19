@@ -229,7 +229,7 @@ resource "azurerm_automation_runbook" "create_bastion" {
 
   tags = var.common_tags
   lifecycle {
-    ignore_changes = [tags, runbook_type]
+    ignore_changes = [tags]
   }
 }
 
@@ -256,7 +256,7 @@ resource "azurerm_automation_runbook" "delete_bastion" {
 
   tags = var.common_tags
   lifecycle {
-    ignore_changes = [tags, runbook_type]
+    ignore_changes = [tags]
   }
 }
 
