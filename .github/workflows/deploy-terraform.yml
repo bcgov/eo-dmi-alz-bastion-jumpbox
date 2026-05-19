@@ -64,6 +64,7 @@ jobs:
           TF_VAR_vnet_name: ${{ secrets.VNET_NAME }}
           TF_VAR_vnet_resource_group_name: ${{ secrets.VNET_RESOURCE_GROUP_NAME }}
           TF_VAR_vnet_address_space: ${{ secrets.VNET_ADDRESS_SPACE }}
+          TF_VAR_vm_admin_login_principal_ids: ${{ secrets.VM_ADMIN_LOGIN_PRINCIPAL_IDS || '[]' }}
         run: |
           set -euo pipefail
           ./deploy-terraform.sh "${{ inputs.terraform_command }}" -auto-approve

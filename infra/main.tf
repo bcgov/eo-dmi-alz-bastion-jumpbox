@@ -76,6 +76,7 @@ module "jumpbox" {
   os_disk_size_gb                           = var.os_disk_size_gb
   subnet_id                                 = module.network.jumpbox_subnet_id
   enable_entra_login                        = var.enable_entra_login
+  vm_admin_login_principal_ids              = var.vm_admin_login_principal_ids
   enable_bastion                            = var.enable_bastion
   enable_bastion_automation                 = var.enable_bastion_automation
   bastion_subnet_id                         = module.network.bastion_subnet_id

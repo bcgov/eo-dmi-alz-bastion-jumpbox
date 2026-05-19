@@ -339,6 +339,14 @@ resource "azurerm_role_assignment" "automation_vm_contributor" {
   principal_id         = azurerm_automation_account.jumpbox.identity[0].principal_id
 }
 
+resource "azurerm_role_assignment" "vm_admin_login" {
+  for_each = toset(var.vm_admin_login_principal_ids)
+
+  scope                = azurerm_linux_virtual_machine.jumpbox.id
+  role_definition_name = "Virtual Machine Administrator Login"
+  principal_id         = each.value
+}
+
 resource "azurerm_virtual_machine_extension" "aad_ssh_login" {
   count = var.enable_entra_login ? 1 : 0
 

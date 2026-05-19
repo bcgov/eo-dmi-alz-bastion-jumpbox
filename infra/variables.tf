@@ -166,6 +166,13 @@ variable "enable_entra_login" {
   default     = true
 }
 
+variable "vm_admin_login_principal_ids" {
+  description = "Optional list of Microsoft Entra object IDs for users or groups that should receive the Virtual Machine Administrator Login role on the jumpbox VM"
+  type        = list(string)
+  default     = []
+  nullable    = false
+}
+
 variable "vm_size" {
   description = "Size of the Linux jumpbox VM. Increase this to scale the single jumpbox vertically."
   type        = string

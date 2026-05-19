@@ -234,6 +234,7 @@ The script derives several values automatically:
 | Environment secret | `AZURE_TENANT_ID` | Entra tenant |
 | Environment secret | `VNET_NAME` | Landing Zone VNet to attach to |
 | Environment secret | `VNET_RESOURCE_GROUP_NAME` | RG of the Landing Zone VNet |
+| Environment secret | `VM_ADMIN_LOGIN_PRINCIPAL_IDS` | Optional JSON array of Entra object IDs to grant `Virtual Machine Administrator Login` on the jumpbox VM |
 | Environment variable | `STORAGE_ACCOUNT_NAME` | Terraform state storage |
 | Repo variable | `SUBSCRIPTION_NAME` | Human-readable subscription name |
 | Repo secret | `SOURCE_VNET_ADDRESS_SPACE` | Written **only** when `environment = tools` |

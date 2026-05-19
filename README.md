@@ -684,7 +684,7 @@ storage, optional GitHub environment secrets), follow **[initial-azure-setup.md]
 - Terraform backend settings come from workflow secrets and variables.
 - Developers do **not** use GitHub OIDC for browser data-plane access — that path is Entra browser login + MFA.
 - `enable_bastion` and `enable_jumpbox` must be `true` in the Terraform inputs for the environment.
-- Add developer or group object IDs to `vm_admin_login_principal_ids` so Entra SSH login is authorized.
+- To grant Entra SSH admin login on the jumpbox through GitHub Actions, set environment secret `VM_ADMIN_LOGIN_PRINCIPAL_IDS` to a JSON array of Entra object IDs.
 
 ---
 
