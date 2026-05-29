@@ -270,13 +270,13 @@ az extension add --name ssh
 ### 1. Sign in to Azure
 
 ```bash
-az login --tenant <tenant-id>
-az account set --subscription <subscription-id>
+az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc
+az account set --subscription ffc5e617-7f2d-4ddb-8b57-33fc43989a8c
 ```
 
 | Placeholder | Example for this deployment |
 |---|---|
-| `<tenant-id>` | Your tenant ID |
+| `<tenant-id>` | `6fdb5200-3d0d-4a8a-b036-d3685e359adc` |
 | `<subscription-id>` | `ffc5e617-7f2d-4ddb-8b57-33fc43989a8c` |
 | `<resource-group>` | `eo-dmi-alz-bastion-jumpbox-tools` |
 | `<bastion-name>` | `eo-dmi-alz-bastion-jumpbox-bastion` |
@@ -286,33 +286,33 @@ A browser opens for MFA. Only browser-based Entra login is supported.
 
 ### 2. Start the SOCKS proxy
 
-Pick the entry point that matches your shell, then jump to step 3.
+Pick the entry point that matches your shell, then jump to step 3
 
 #### macOS / Linux / Git Bash
 
 ```bash
 ./infra/scripts/bastion-proxy.sh \
-  --resource-group <resource-group> \
-  --bastion-name   <bastion-name> \
-  --vm-name        <vm-name>
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
+  --bastion-name   eo-dmi-alz-bastion-jumpbox-bastion \
+  --vm-name        eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
 
 #### Windows (PowerShell 7+)
 
 ```powershell
 .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup <resource-group> `
-  -BastionName   <bastion-name> `
-  -VmName        <vm-name>
+  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
+  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
+  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
 
 If Windows execution policy blocks local scripts, prefix with a bypass:
 
 ```powershell
 pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup <resource-group> `
-  -BastionName   <bastion-name> `
-  -VmName        <vm-name>
+  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
+  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
+  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
 
 The script prints when the SOCKS endpoint is live (default `localhost:8228`).
@@ -444,15 +444,15 @@ The jumpbox can also expose private **TCP services** to local desktop tools — 
 
 ```powershell
 $vmId = az vm show `
-  --subscription   <subscription-id> `
-  --resource-group <resource-group> `
-  --name           <vm-name> `
+  --subscription   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools `
+  --name           eo-dmi-alz-bastion-jumpbox-jumpbox `
   --query id --output tsv
 
 az network bastion ssh `
-  --subscription       <subscription-id> `
-  --name               <bastion-name> `
-  --resource-group     <resource-group> `
+  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name               eo-dmi-alz-bastion-jumpbox-bastion `
+  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:15432:<postgres-private-hostname-or-ip>:5432 -N -o StrictHostKeyChecking=no
@@ -470,15 +470,15 @@ Once the tunnel is up, point your client at the local listener:
 
 ```powershell
 $vmId = az vm show `
-  --subscription   <subscription-id> `
-  --resource-group <resource-group> `
-  --name           <vm-name> `
+  --subscription   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools `
+  --name           eo-dmi-alz-bastion-jumpbox-jumpbox `
   --query id --output tsv
 
 az network bastion ssh `
-  --subscription       <subscription-id> `
-  --name               <bastion-name> `
-  --resource-group     <resource-group> `
+  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name               eo-dmi-alz-bastion-jumpbox-bastion `
+  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:16379:<redis-private-hostname-or-ip>:6380 -N -o StrictHostKeyChecking=no
@@ -609,7 +609,7 @@ Set `BastionName` to your Bastion resource name (for this deployment, `eo-dmi-al
 Sessions whose `SessionEndTime` is still empty, with elapsed time since `SessionStartTime`.
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(1d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -634,7 +634,7 @@ MicrosoftAzureBastionAuditLogs
 Completed sessions, using the logged `Duration` value (milliseconds).
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(7d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -658,7 +658,7 @@ MicrosoftAzureBastionAuditLogs
 ### Query: total Bastion time by user
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(30d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -720,7 +720,7 @@ storage, optional GitHub environment secrets), follow **[initial-azure-setup.md]
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `az network bastion ssh` fails with auth errors | Expired or missing Entra session | Re-run `az login --tenant <tenant-id>`, complete MFA, confirm with `az account show` |
+| `az network bastion ssh` fails with auth errors | Expired or missing Entra session | Re-run `az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc`, complete MFA, confirm with `az account show` |
 | Tunnel opens, then `Permission denied (publickey).` | Missing VM Login RBAC, or assignment not yet propagated | Assign `Virtual Machine Administrator Login` / `User Login` on the VM (or inherited scope); wait a few minutes |
 | Proxy starts but browser can't resolve a private hostname | DNS resolved locally instead of remotely | Enable **Remote DNS** / `proxy DNS when using SOCKS v5` and use SOCKS5 (not SOCKS4) |
 | Script reports the VM is stopped | Outside auto-start window | Let the script start it when prompted, wait for next weekday 15:00 UTC, or `az vm start` manually |
@@ -743,8 +743,8 @@ az account show --query "{name:name, tenantId:tenantId, user:user.name}" --outpu
 **Start / stop the VM manually**
 
 ```bash
-az vm start      --resource-group <resource-group> --name <vm-name>
-az vm deallocate --resource-group <resource-group> --name <vm-name>
+az vm start      --resource-group eo-dmi-alz-bastion-jumpbox-tools --name eo-dmi-alz-bastion-jumpbox-jumpbox
+az vm deallocate --resource-group eo-dmi-alz-bastion-jumpbox-tools --name eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
 
 **Validate Terraform locally**
