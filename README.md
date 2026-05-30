@@ -16,9 +16,9 @@ periodic assessment** so update compliance is visible and ✅ aligned with the
 ## TL;DR
 
 ```text
-1. az login                                          # browser MFA
-2. ./infra/scripts/bastion-proxy.{sh|ps1} ...        # tunnel up on localhost:8228
-3. Launch a dedicated browser profile → SOCKS5 127.0.0.1:8228
+1. Run bastion-proxy.{sh|ps1}                         # installs az cli/extensions if needed
+2. Complete browser login + MFA if Azure CLI prompts
+3. Use the dedicated proxy browser                    # auto-opens on Windows PowerShell when available
 ```
 
 You will need `Virtual Machine Administrator Login` (or `User Login`) RBAC on the jumpbox.
@@ -55,7 +55,7 @@ For database / cache clients, see [Native tunneling for data clients](#native-tu
 | **What** | Azure Bastion + minimal Ubuntu jumpbox in a private VNet |
 | **Why** | Reach private endpoints (Storage, Fabric, Key Vault, Postgres, Redis, …) from a workstation without a VPN or public IPs |
 | **Who** | Developers with Entra access to the subscription and VM login RBAC on the jumpbox |
-| **How auth** | Browser-based `az login` with MFA → Entra → Bastion → jumpbox |
+| **How auth** | Browser-based `az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc` with MFA → Entra → Bastion → jumpbox |
 | **How traffic** | SOCKS5 dynamic proxy (`ssh -D`) for browsers, local port forward (`ssh -L`) for TCP clients |
 | **Default SOCKS port** | `127.0.0.1:8228` |
 | **Time to first connection** | ~2 minutes once prerequisites are in place |
@@ -109,11 +109,11 @@ sequenceDiagram
   participant VM as Jumpbox VM
   participant Endpoint as Private endpoint
 
-  Dev->>CLI: az login --tenant <tenant-id>
-  CLI->>Browser: Open browser login
+  Dev->>CLI: Run bastion-proxy script
+  CLI->>CLI: Install Azure CLI + extensions if missing
+  CLI->>Browser: Open browser login if session is missing
   Browser->>Entra: Sign in + MFA
   Entra-->>CLI: Session token
-  Dev->>CLI: Run bastion-proxy script
   CLI->>ARM: Resolve VM / Bastion
   CLI->>ARM: Start VM if stopped (with consent)
   CLI->>Bastion: az network bastion ssh --auth-type AAD
@@ -131,7 +131,7 @@ flowchart TD
   prereq -- no --> install[Install Azure CLI<br/>+ bastion / ssh extensions]
   prereq -- yes --> login{Logged in?}
   install --> login
-  login -- no --> browserLogin[az login<br/>browser MFA]
+  login -- no --> browserLogin[az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc<br/>browser MFA]
   login -- yes --> sub[Set subscription]
   browserLogin --> sub
   sub --> vmState{VM running?}
@@ -154,8 +154,8 @@ Terraform under `infra/` deploys:
 | Azure Bastion **Standard** | Native client tunneling for AAD-authenticated SSH |
 | Ubuntu jumpbox VM | Minimal Linux host, **no public IP**, Entra SSH extension installed |
 | RBAC assignments | `Virtual Machine Administrator Login` / `User Login` for configured Entra principals |
-| Auto-shutdown schedule | Daily 7 PM Pacific (DevTest schedule on the VM) |
-| Auto-start schedule | Weekdays 15:00 UTC (Azure Automation runbook) |
+| Auto-shutdown schedule | Daily 6 PM Pacific time (DevTest schedule on the VM) |
+| Auto-start schedule | Weekdays 9 AM Pacific time (16:00 UTC; Azure Automation runbook) |
 | Log Analytics workspace | Receives `BastionAuditLogs` diagnostic stream |
 | Automatic VM Guest Patching | OS patching on the jumpbox |
 | Update Manager periodic assessment | Visibility into update compliance |
@@ -266,60 +266,26 @@ az extension add --name ssh
 ## Quick start
 
 > Time to first connection: **~2 minutes** once the prerequisites above are in place.
+> If Azure CLI must be installed on first run, allow extra time.
 
-### 1. Sign in to Azure
+### 1. Start the SOCKS proxy directly from GitHub (no clone required)
 
-```bash
-az login --tenant <tenant-id>
-az account set --subscription <subscription-id>
-```
+The direct-from-GitHub path is self-bootstrapping. The script:
 
-| Placeholder | Example for this deployment |
+- installs Azure CLI if missing where automatic install is supported on your platform
+- installs the `bastion` and `ssh` Azure CLI extensions if they are missing
+- checks for a valid Azure CLI session in the BC Gov tenant (`6fdb5200-3d0d-4a8a-b036-d3685e359adc`)
+- if needed, opens browser-based Entra login for that tenant and waits for MFA to complete before continuing
+
+Only browser-based Entra login in the BC Gov tenant is supported.
+
+| Value | Example for this deployment |
 |---|---|
-| `<tenant-id>` | Your tenant ID |
+| `<tenant-id>` | `6fdb5200-3d0d-4a8a-b036-d3685e359adc` |
 | `<subscription-id>` | `ffc5e617-7f2d-4ddb-8b57-33fc43989a8c` |
 | `<resource-group>` | `eo-dmi-alz-bastion-jumpbox-tools` |
 | `<bastion-name>` | `eo-dmi-alz-bastion-jumpbox-bastion` |
 | `<vm-name>` | `eo-dmi-alz-bastion-jumpbox-jumpbox` |
-
-A browser opens for MFA. Only browser-based Entra login is supported.
-
-### 2. Start the SOCKS proxy
-
-Pick the entry point that matches your shell, then jump to step 3.
-
-#### macOS / Linux / Git Bash
-
-```bash
-./infra/scripts/bastion-proxy.sh \
-  --resource-group <resource-group> \
-  --bastion-name   <bastion-name> \
-  --vm-name        <vm-name>
-```
-
-#### Windows (PowerShell 7+)
-
-```powershell
-.\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup <resource-group> `
-  -BastionName   <bastion-name> `
-  -VmName        <vm-name>
-```
-
-If Windows execution policy blocks local scripts, prefix with a bypass:
-
-```powershell
-pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
-  -ResourceGroup <resource-group> `
-  -BastionName   <bastion-name> `
-  -VmName        <vm-name>
-```
-
-The script prints when the SOCKS endpoint is live (default `localhost:8228`).
-**Keep this terminal window open** — closing it tears down the tunnel.
-
-<details>
-<summary>Run the script directly from GitHub (no clone required)</summary>
 
 These variants download the script to a temp file, execute it, then delete it. Replace `main`
 with a tag or commit SHA if you want a fixed script version.
@@ -372,13 +338,22 @@ finally {
 }
 ```
 
+The script prints when the SOCKS endpoint is live (default `localhost:8228`).
+**Keep this terminal window open** — closing it tears down the tunnel.
+
+> [!TIP]
+> On Windows, the PowerShell script automatically opens a dedicated proxy-configured browser
+> window after the SOCKS tunnel is ready. It prefers **Edge** and falls back to **Chrome** if
+> Edge is not installed.
+
 > Downloading to a `.ps1` first (instead of `iex`-piping) avoids quoting / variable-expansion
 > issues and works correctly with the script's `CmdletBinding()` + `param()` signature.
-</details>
 
-### 3. Point a browser at the proxy
+### 2. Continue in the browser
 
-Launch a **dedicated browser profile** so regular browsing isn't routed through the tunnel.
+If you ran the PowerShell script on Windows and it opened a browser automatically, use that
+browser window for private access. Otherwise, launch a **dedicated browser profile** so regular
+browsing isn't routed through the tunnel.
 
 ```powershell
 # Edge
@@ -391,6 +366,39 @@ chrome.exe --user-data-dir="$env:TEMP\bastion-jumpbox-chrome" --proxy-server="so
 Then browse to your private endpoint — e.g. `https://<account>.dfs.core.windows.net/`.
 
 ➡️ Need a database or cache client instead? See [Native tunneling for data clients](#native-tunneling-for-data-clients).
+
+### 3. Optional: run from a local clone instead
+
+If you already cloned this repo, use the local entry point that matches your shell. The local
+scripts follow the same Azure CLI install, extension install, and login checks as the no-clone
+examples above.
+
+#### macOS / Linux / Git Bash
+
+```bash
+./infra/scripts/bastion-proxy.sh \
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools \
+  --bastion-name   eo-dmi-alz-bastion-jumpbox-bastion \
+  --vm-name        eo-dmi-alz-bastion-jumpbox-jumpbox
+```
+
+#### Windows (PowerShell 7+)
+
+```powershell
+.\infra\scripts\bastion-proxy.ps1 `
+  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
+  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
+  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+```
+
+If Windows execution policy blocks local scripts, prefix with a bypass:
+
+```powershell
+pwsh -ExecutionPolicy Bypass -File .\infra\scripts\bastion-proxy.ps1 `
+  -ResourceGroup eo-dmi-alz-bastion-jumpbox-tools `
+  -BastionName   eo-dmi-alz-bastion-jumpbox-bastion `
+  -VmName        eo-dmi-alz-bastion-jumpbox-jumpbox
+```
 
 ---
 
@@ -444,15 +452,15 @@ The jumpbox can also expose private **TCP services** to local desktop tools — 
 
 ```powershell
 $vmId = az vm show `
-  --subscription   <subscription-id> `
-  --resource-group <resource-group> `
-  --name           <vm-name> `
+  --subscription   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools `
+  --name           eo-dmi-alz-bastion-jumpbox-jumpbox `
   --query id --output tsv
 
 az network bastion ssh `
-  --subscription       <subscription-id> `
-  --name               <bastion-name> `
-  --resource-group     <resource-group> `
+  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name               eo-dmi-alz-bastion-jumpbox-bastion `
+  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:15432:<postgres-private-hostname-or-ip>:5432 -N -o StrictHostKeyChecking=no
@@ -470,15 +478,15 @@ Once the tunnel is up, point your client at the local listener:
 
 ```powershell
 $vmId = az vm show `
-  --subscription   <subscription-id> `
-  --resource-group <resource-group> `
-  --name           <vm-name> `
+  --subscription   ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --resource-group eo-dmi-alz-bastion-jumpbox-tools `
+  --name           eo-dmi-alz-bastion-jumpbox-jumpbox `
   --query id --output tsv
 
 az network bastion ssh `
-  --subscription       <subscription-id> `
-  --name               <bastion-name> `
-  --resource-group     <resource-group> `
+  --subscription       ffc5e617-7f2d-4ddb-8b57-33fc43989a8c `
+  --name               eo-dmi-alz-bastion-jumpbox-bastion `
+  --resource-group     eo-dmi-alz-bastion-jumpbox-tools `
   --target-resource-id $vmId `
   --auth-type          AAD `
   -- -L 127.0.0.1:16379:<redis-private-hostname-or-ip>:6380 -N -o StrictHostKeyChecking=no
@@ -501,22 +509,25 @@ unless the target service is configured differently.
 ```mermaid
 stateDiagram-v2
   [*] --> Deallocated
-  Deallocated --> Running: Weekday 15:00 UTC<br/>Automation runbook
+  Deallocated --> Running: Weekday 09:00 Pacific time<br/>Automation runbook
   Deallocated --> Running: Developer starts VM<br/>(proxy script or portal)
-  Running --> Deallocated: Daily 19:00 Pacific<br/>DevTest schedule
+  Running --> Deallocated: Daily 18:00 Pacific time<br/>DevTest schedule
 ```
 
 | Event | When | Where it lives |
 |---|---|---|
-| Auto-start | Weekdays 15:00 UTC | Azure Automation runbook |
-| Auto-shutdown | Daily 19:00 Pacific | DevTest auto-shutdown on the VM |
+| Auto-start | Weekdays 09:00 Pacific time (16:00 UTC) | Azure Automation runbook |
+| Auto-shutdown | Daily 18:00 Pacific time (01:00 UTC next day) | DevTest auto-shutdown on the VM |
 | Weekend default | VM stays stopped unless started manually | — |
 
 > [!NOTE]
-> **Time-zone math.** Azure Automation schedules in this repo are configured in **UTC**.
-> `15:00 UTC` lands at **08:00 PDT** (Mar–Nov, UTC-7) and **07:00 PST** (Nov–Mar, UTC-8).
-> The optional Bastion delete/recreate automation uses `02:00 UTC` for delete and
-> `15:00 UTC` for create.
+> **Time-zone math.** British Columbia now observes permanent year-round daylight saving time.
+> Pacific time is the province's year-round time zone and stays at `UTC-7`.
+> The automation schedules in this repo are configured in **UTC**.
+> `16:00 UTC` lands at **09:00 Pacific time**.
+> `01:00 UTC` (next day) lands at **18:00 Pacific time** (previous day).
+> The optional Bastion delete/recreate automation uses `01:00 UTC` for delete and
+> `16:00 UTC` for create.
 
 > [!NOTE]
 > The Automation Python runbooks in this repo are designed to be **idempotent** and
@@ -609,7 +620,7 @@ Set `BastionName` to your Bastion resource name (for this deployment, `eo-dmi-al
 Sessions whose `SessionEndTime` is still empty, with elapsed time since `SessionStartTime`.
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(1d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -634,7 +645,7 @@ MicrosoftAzureBastionAuditLogs
 Completed sessions, using the logged `Duration` value (milliseconds).
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(7d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -658,7 +669,7 @@ MicrosoftAzureBastionAuditLogs
 ### Query: total Bastion time by user
 
 ```kql
-let BastionName = "<bastion-name>";
+let BastionName = "eo-dmi-alz-bastion-jumpbox-bastion";
 MicrosoftAzureBastionAuditLogs
 | where TimeGenerated > ago(30d)
 | where _ResourceId has strcat("/bastionHosts/", BastionName)
@@ -720,14 +731,14 @@ storage, optional GitHub environment secrets), follow **[initial-azure-setup.md]
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `az network bastion ssh` fails with auth errors | Expired or missing Entra session | Re-run `az login --tenant <tenant-id>`, complete MFA, confirm with `az account show` |
+| `az network bastion ssh` fails with auth errors | Expired or missing Entra session | Re-run `az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc`, complete MFA, confirm with `az account show` |
 | Tunnel opens, then `Permission denied (publickey).` | Missing VM Login RBAC, or assignment not yet propagated | Assign `Virtual Machine Administrator Login` / `User Login` on the VM (or inherited scope); wait a few minutes |
 | Proxy starts but browser can't resolve a private hostname | DNS resolved locally instead of remotely | Enable **Remote DNS** / `proxy DNS when using SOCKS v5` and use SOCKS5 (not SOCKS4) |
-| Script reports the VM is stopped | Outside auto-start window | Let the script start it when prompted, wait for next weekday 15:00 UTC, or `az vm start` manually |
+| Script reports the VM is stopped | Outside auto-start window | Let the script start it when prompted, wait for next weekday 09:00 Pacific time (16:00 UTC), or `az vm start` manually |
 | Browser still uses the normal internet path | Default profile ignores the proxy flag | Launch a dedicated profile with `--proxy-server="socks5://127.0.0.1:8228"` |
 | `bastion` command not found | Missing CLI extensions | `az extension add --name bastion` and `--name ssh` |
 | `az extension add` fails with `pip` errors | Extension install is picking up the wrong Python runtime | Find the Python used by `az`, point your Python path at the Azure CLI runtime, then retry the extension install |
-| Tunnel closes after long idle | Entra token expiry | Re-run `az login` with MFA and restart the proxy script |
+| Tunnel closes after long idle | Entra token expiry | Re-run `az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc` with MFA and restart the proxy script |
 | Data client times out, but tunnel is "open" | Network path / private DNS between jumpbox and target | Verify peering, NSG, and private DNS; try the target's private IP directly to isolate DNS |
 
 ---
@@ -743,8 +754,8 @@ az account show --query "{name:name, tenantId:tenantId, user:user.name}" --outpu
 **Start / stop the VM manually**
 
 ```bash
-az vm start      --resource-group <resource-group> --name <vm-name>
-az vm deallocate --resource-group <resource-group> --name <vm-name>
+az vm start      --resource-group eo-dmi-alz-bastion-jumpbox-tools --name eo-dmi-alz-bastion-jumpbox-jumpbox
+az vm deallocate --resource-group eo-dmi-alz-bastion-jumpbox-tools --name eo-dmi-alz-bastion-jumpbox-jumpbox
 ```
 
 **Validate Terraform locally**
