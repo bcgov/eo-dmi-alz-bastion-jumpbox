@@ -154,8 +154,8 @@ Terraform under `infra/` deploys:
 | Azure Bastion **Standard** | Native client tunneling for AAD-authenticated SSH |
 | Ubuntu jumpbox VM | Minimal Linux host, **no public IP**, Entra SSH extension installed |
 | RBAC assignments | `Virtual Machine Administrator Login` / `User Login` for configured Entra principals |
-| Auto-shutdown schedule | Daily 6 PM Pacific (DevTest schedule on the VM) |
-| Auto-start schedule | Weekdays 16:00 UTC (Azure Automation runbook) |
+| Auto-shutdown schedule | Daily 6 PM Pacific time (DevTest schedule on the VM) |
+| Auto-start schedule | Weekdays 9 AM Pacific time (16:00 UTC; Azure Automation runbook) |
 | Log Analytics workspace | Receives `BastionAuditLogs` diagnostic stream |
 | Automatic VM Guest Patching | OS patching on the jumpbox |
 | Update Manager periodic assessment | Visibility into update compliance |
@@ -506,21 +506,23 @@ unless the target service is configured differently.
 ```mermaid
 stateDiagram-v2
   [*] --> Deallocated
-  Deallocated --> Running: Weekday 16:00 UTC<br/>Automation runbook
+  Deallocated --> Running: Weekday 09:00 Pacific time<br/>Automation runbook
   Deallocated --> Running: Developer starts VM<br/>(proxy script or portal)
-  Running --> Deallocated: Daily 18:00 Pacific<br/>DevTest schedule
+  Running --> Deallocated: Daily 18:00 Pacific time<br/>DevTest schedule
 ```
 
 | Event | When | Where it lives |
 |---|---|---|
-| Auto-start | Weekdays 16:00 UTC | Azure Automation runbook |
-| Auto-shutdown | Daily 18:00 Pacific (01:00 UTC) | DevTest auto-shutdown on the VM |
+| Auto-start | Weekdays 09:00 Pacific time (16:00 UTC) | Azure Automation runbook |
+| Auto-shutdown | Daily 18:00 Pacific time (01:00 UTC next day) | DevTest auto-shutdown on the VM |
 | Weekend default | VM stays stopped unless started manually | — |
 
 > [!NOTE]
-> **Time-zone math.** Azure Automation schedules in this repo are configured in **UTC**.
-> `16:00 UTC` lands at **09:00 PDT** (Mar–Nov, UTC-7) and **08:00 PST** (Nov–Mar, UTC-8).
-> `01:00 UTC` (next day) lands at **18:00 PDT** (previous day, UTC-7) and **17:00 PST** (previous day, UTC-8).
+> **Time-zone math.** British Columbia now observes permanent year-round daylight saving time.
+> Pacific time is the province's year-round time zone and stays at `UTC-7`.
+> The automation schedules in this repo are configured in **UTC**.
+> `16:00 UTC` lands at **09:00 Pacific time**.
+> `01:00 UTC` (next day) lands at **18:00 Pacific time** (previous day).
 > The optional Bastion delete/recreate automation uses `01:00 UTC` for delete and
 > `16:00 UTC` for create.
 
@@ -729,7 +731,7 @@ storage, optional GitHub environment secrets), follow **[initial-azure-setup.md]
 | `az network bastion ssh` fails with auth errors | Expired or missing Entra session | Re-run `az login --tenant 6fdb5200-3d0d-4a8a-b036-d3685e359adc`, complete MFA, confirm with `az account show` |
 | Tunnel opens, then `Permission denied (publickey).` | Missing VM Login RBAC, or assignment not yet propagated | Assign `Virtual Machine Administrator Login` / `User Login` on the VM (or inherited scope); wait a few minutes |
 | Proxy starts but browser can't resolve a private hostname | DNS resolved locally instead of remotely | Enable **Remote DNS** / `proxy DNS when using SOCKS v5` and use SOCKS5 (not SOCKS4) |
-| Script reports the VM is stopped | Outside auto-start window | Let the script start it when prompted, wait for next weekday 16:00 UTC, or `az vm start` manually |
+| Script reports the VM is stopped | Outside auto-start window | Let the script start it when prompted, wait for next weekday 09:00 Pacific time (16:00 UTC), or `az vm start` manually |
 | Browser still uses the normal internet path | Default profile ignores the proxy flag | Launch a dedicated profile with `--proxy-server="socks5://127.0.0.1:8228"` |
 | `bastion` command not found | Missing CLI extensions | `az extension add --name bastion` and `--name ssh` |
 | `az extension add` fails with `pip` errors | Extension install is picking up the wrong Python runtime | Find the Python used by `az`, point your Python path at the Azure CLI runtime, then retry the extension install |
