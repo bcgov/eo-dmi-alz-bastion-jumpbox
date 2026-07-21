@@ -176,7 +176,7 @@ variable "vm_admin_login_principal_ids" {
 variable "vm_size" {
   description = "Size of the Linux jumpbox VM. Increase this to scale the single jumpbox vertically."
   type        = string
-  default     = "Standard_B2als_v2"
+  default     = "Standard_D2ls_v5"
 }
 
 variable "os_disk_type" {
